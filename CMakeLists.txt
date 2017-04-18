@@ -83,9 +83,122 @@ add_library(AirQualitySensor Grove_Air_Quality_Sensor_Library/Air_Quality.cpp)
 include_directories(AirQualitySensor PUBLIC
                     Grove_Air_Quality_Sensor_Library)
 
-add_executable(airquality main.cpp)
+add_library(mbed-os-quectelM66-driver
+        mbed-os-quectelM66-driver/M66Interface.cpp
+        mbed-os-quectelM66-driver/M66ATParser/M66ATParser.cpp
+        mbed-os-quectelM66-driver/M66ATParser/BufferedSerial/BufferedPrint.c
+        mbed-os-quectelM66-driver/M66ATParser/BufferedSerial/BufferedSerial.cpp
+        mbed-os-quectelM66-driver/M66ATParser/BufferedSerial/Buffer/MyBuffer.cpp
+        )
+target_include_directories(mbed-os-quectelM66-driver PUBLIC
+        mbed-os-quectelM66-driver
+        mbed-os-quectelM66-driver/M66ATParser
+        mbed-os-quectelM66-driver/M66ATParser/BufferedSerial
+        mbed-os-quectelM66-driver/M66ATParser/BufferedSerial/Buffer
+        )
 
-target_link_libraries(airquality mbed-os AirQualitySensor)
+add_library(MQTT
+        MQTT/MQTTPacket/MQTTConnectClient.c
+        MQTT/MQTTPacket/MQTTConnectServer.c
+        MQTT/MQTTPacket/MQTTPacket.c
+        MQTT/MQTTPacket/MQTTSerializePublish.c
+        MQTT/MQTTPacket/MQTTSubscribeClient.c
+        MQTT/MQTTPacket/MQTTSubscribeServer.c
+        MQTT/MQTTPacket/MQTTUnsubscribeClient.c
+        MQTT/MQTTPacket/MQTTUnsubscribeServer.c
+        )
+target_include_directories(MQTT PUBLIC
+        MQTT
+        MQTT/MQTTPacket
+        )
+
+add_library(wolfSSL
+        wolfSSL/src/crl.c
+        wolfSSL/src/internal.c
+        wolfSSL/src/io.c
+        wolfSSL/src/keys.c
+        wolfSSL/src/ocsp.c
+        wolfSSL/src/sniffer.c
+        wolfSSL/src/ssl.c
+        wolfSSL/src/tls.c
+        wolfSSL/wolfcrypt/src/aes.c
+        wolfSSL/wolfcrypt/src/arc4.c
+        wolfSSL/wolfcrypt/src/asm.c
+        wolfSSL/wolfcrypt/src/asn.c
+        wolfSSL/wolfcrypt/src/blake2b.c
+        wolfSSL/wolfcrypt/src/camellia.c
+        wolfSSL/wolfcrypt/src/chacha.c
+        wolfSSL/wolfcrypt/src/chacha20_poly1305.c
+        wolfSSL/wolfcrypt/src/coding.c
+        wolfSSL/wolfcrypt/src/compress.c
+        wolfSSL/wolfcrypt/src/curve25519.c
+        wolfSSL/wolfcrypt/src/des3.c
+        wolfSSL/wolfcrypt/src/dh.c
+        wolfSSL/wolfcrypt/src/dsa.c
+        wolfSSL/wolfcrypt/src/ecc.c
+        wolfSSL/wolfcrypt/src/ecc_fp.c
+        wolfSSL/wolfcrypt/src/ed25519.c
+        wolfSSL/wolfcrypt/src/error.c
+        wolfSSL/wolfcrypt/src/fe_low_mem.c
+        wolfSSL/wolfcrypt/src/fe_operations.c
+        wolfSSL/wolfcrypt/src/ge_low_mem.c
+        wolfSSL/wolfcrypt/src/ge_operations.c
+        wolfSSL/wolfcrypt/src/hash.c
+        wolfSSL/wolfcrypt/src/hc128.c
+        wolfSSL/wolfcrypt/src/hmac.c
+        wolfSSL/wolfcrypt/src/idea.c
+        wolfSSL/wolfcrypt/src/integer.c
+        wolfSSL/wolfcrypt/src/logging.c
+        wolfSSL/wolfcrypt/src/md2.c
+        wolfSSL/wolfcrypt/src/md4.c
+        wolfSSL/wolfcrypt/src/md5.c
+        wolfSSL/wolfcrypt/src/memory.c
+        wolfSSL/wolfcrypt/src/misc.c
+        wolfSSL/wolfcrypt/src/pkcs7.c
+        wolfSSL/wolfcrypt/src/poly1305.c
+        wolfSSL/wolfcrypt/src/pwdbased.c
+        wolfSSL/wolfcrypt/src/rabbit.c
+        wolfSSL/wolfcrypt/src/random.c
+        wolfSSL/wolfcrypt/src/ripemd.c
+        wolfSSL/wolfcrypt/src/rsa.c
+        wolfSSL/wolfcrypt/src/sha.c
+        wolfSSL/wolfcrypt/src/sha256.c
+        wolfSSL/wolfcrypt/src/sha512.c
+        wolfSSL/wolfcrypt/src/signature.c
+        wolfSSL/wolfcrypt/src/srp.c
+        wolfSSL/wolfcrypt/src/tfm.c
+        wolfSSL/wolfcrypt/src/wc_encrypt.c
+        wolfSSL/wolfcrypt/src/wc_port.c
+        )
+target_compile_definitions(wolfSSL PUBLIC -DWOLFSSL_BASE64_ENCODE)
+target_include_directories(wolfSSL PUBLIC wolfSSL)
+
+add_library(CRYPTO crypto/crypto.c)
+target_link_libraries(CRYPTO PUBLIC wolfSSL)
+target_include_directories(CRYPTO PUBLIC crypto)
+
+add_library(JSMN jsmn/jsmn.c)
+target_include_directories(JSMN PUBLIC jsmn)
+
+add_library(VLLS mbed-kinetis-lowpower/kinetis_lowpower.cpp)
+target_include_directories(VLLS PUBLIC mbed-kinetis-lowpower)
+
+add_library(HTTP mbed-http/http_parser/http_parser.c)
+target_include_directories(HTTP PUBLIC mbed-http/http_parser
+                                       mbed-http/source
+                                       mbed-http)
+
+add_executable(airquality src/main.cpp src/response.c)
+
+target_link_libraries(airquality mbed-os AirQualitySensor
+        wolfSSL
+        mbed-os-quectelM66-driver
+        VLLS
+        MQTT
+        JSMN
+        CRYPTO
+        HTTP
+        )
 
 add_custom_target(airquality-compile ALL
         COMMAND mbed compile --profile mbed-os/tools/profiles/debug.json

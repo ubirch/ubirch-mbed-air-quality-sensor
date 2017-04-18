@@ -8,4 +8,3 @@ Debug/*
 
 NTAG_I2C_API/src/UNITY/*
 NTAG_I2C_API/src/HAL_ISR/*
-mbed-kinetis-lowpower/*
