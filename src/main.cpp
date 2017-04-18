@@ -186,7 +186,7 @@ int HTTPSession() {
     delete socket;
 
     modem.powerDown();
-    powerDownWakeupOnRtc(30);
+    powerDownWakeupOnRtc(5 * 60);
 
     return 0;
 }
