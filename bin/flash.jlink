@@ -1,0 +1,5 @@
+loadbin ./BUILD/UBRIDGE/GCC_ARM/ubirch-mbed-air-quality-sensor.bin, 0x0
+r
+g
+exit
+
