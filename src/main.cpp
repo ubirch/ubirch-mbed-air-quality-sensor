@@ -13,20 +13,33 @@
 
 #define PRINTF printf
 
-static int current_quality = -1;
-static int pv = -1;
+static int current_quality1 = -1;
+static int current_quality2 = -1;
+static int current_quality3 = -1;
+static int current_quality4 = -1;
+static int pv1 = -1;
+static int pv2 = -1;
+static int pv3 = -1;
+static int pv4 = -1;
 
 static unsigned int interval = 5;
 static int loop_counter = 0;
 
 uint8_t error_flag = 0x00;
 
-PinName analogPin(PTC1);
+PinName analogPin1(PTC1);
+PinName analogPin2(PTC2);
+PinName analogPin3(PTB0);
+PinName analogPin4(PTB1);
+
 DigitalOut extPower(PTC8);
 DigitalOut led1(LED1);
 M66Interface modem(GSM_UART_TX, GSM_UART_RX, GSM_PWRKEY, GSM_POWER, true);
 
-AirQuality airqualitysensor;
+AirQuality airqualitysensor1;
+AirQuality airqualitysensor2;
+AirQuality airqualitysensor3;
+AirQuality airqualitysensor4;
 
 void dbg_dump(const char *prefix, const uint8_t *b, size_t size) {
     for (int i = 0; i < size; i += 16) {
@@ -56,10 +69,10 @@ void dump_response(HttpResponse* res) {
 // Interrupt Handler
 void AirQualityInterrupt(void)
 {
-    AnalogIn sensor(analogPin);
-    airqualitysensor.last_vol = airqualitysensor.first_vol;
-    airqualitysensor.first_vol = sensor.read()*1000;
-    airqualitysensor.timer_index = 1;
+    AnalogIn sensor(analogPin1);
+    airqualitysensor1.last_vol = airqualitysensor1.first_vol;
+    airqualitysensor1.first_vol = sensor.read()*1000;
+    airqualitysensor1.timer_index = 1;
 }
 
 int HTTPSession() {
@@ -118,21 +131,21 @@ int HTTPSession() {
     uc_init();
     uc_import_ecc_key(&uc_key, device_ecc_key, device_ecc_key_len);
 
-    int temperature = current_quality;
-    uint8_t pressure = 0;
-    int humidity = pv;
-    uint8_t altitude = 0;
+    int temperature = airqualitysensor1.first_vol;
+    int pressure    = airqualitysensor2.first_vol;
+    int humidity    = airqualitysensor3.first_vol;
+    int altitude    = airqualitysensor4.first_vol;
     //++++++++++++++++++++++++++++++++++++++++++
     //++++++++++++++++++++++++++++++++++++++++
     // payload structure to be signed
     // Example: '{"t":22.0,"p":1019.5,"h":40.2,"lat":"12.475886","lon":"51.505264","bat":100,"lps":99999}'
     int payload_size = snprintf(NULL, 0, payload_template,
-                                (int) (temperature * 100.0f), (int) pressure, (int) ((humidity) * 100.0f),
+                                (int) (temperature * 100.0f), pressure * 100, (int) ((humidity) * 100.0f),
                                 (int) (altitude * 100.0f),
                                 lat, lon, level, loop_counter, error_flag);
     char *payload = (char *) malloc((size_t) payload_size);
     sprintf(payload, payload_template,
-            (int) (temperature * 100.0f), (int) (pressure), (int) ((humidity) * 100.0f), (int) (altitude * 100.0f),
+            (int) (temperature * 100.0f), pressure * 100, (int) ((humidity) * 100.0f), (int) (altitude * 100.0f),
             lat, lon, level, loop_counter, error_flag);
 
     error_flag = 0x00;
@@ -199,25 +212,36 @@ void ledBlink(void const *args){
 }
 
 void getAirQualityValue(void const *args) {
-    AnalogIn sensor(analogPin);
+    AnalogIn sensor1(analogPin1);
+    AnalogIn sensor2(analogPin2);
+    AnalogIn sensor3(analogPin3);
+    AnalogIn sensor4(analogPin4);
 
     while(1) {
-        airqualitysensor.last_vol = airqualitysensor.first_vol;
-        airqualitysensor.first_vol = sensor.read() * 1000;
-        airqualitysensor.timer_index = 1;
+        //Air sensor 1
+        airqualitysensor1.last_vol = airqualitysensor1.first_vol;
+        airqualitysensor1.first_vol = sensor1.read() * 1000;
+        airqualitysensor1.timer_index = 1;
+        current_quality1 = airqualitysensor1.slope();
 
-        current_quality = airqualitysensor.slope(&pv);
-//        if (current_quality >= 0) { // if a valid data returned.
-//            if (current_quality == 0)
-//                    printf("High pollution! Force signal active\n\r");
-//            else if (current_quality == 1)
-//                    printf("High pollution!\n\r");
-//            else if (current_quality == 2)
-//                    printf("Low pollution!\n\r");
-//            else if (current_quality == 3)
-//                    printf("Fresh air\n\r");
-//        }
-    Thread::wait(1500);
+        //Air sensor 2
+        airqualitysensor2.last_vol = airqualitysensor2.first_vol;
+        airqualitysensor2.first_vol = sensor2.read() * 1000;
+        airqualitysensor2.timer_index = 1;
+        current_quality2 = airqualitysensor2.slope();
+
+        //Air sensor 2
+        airqualitysensor3.last_vol = airqualitysensor3.first_vol;
+        airqualitysensor3.first_vol = sensor3.read() * 1000;
+        airqualitysensor3.timer_index = 1;
+        current_quality3 = airqualitysensor3.slope();
+
+        //Air sensor 2
+        airqualitysensor4.last_vol = airqualitysensor4.first_vol;
+        airqualitysensor4.first_vol = sensor4.read() * 1000;
+        airqualitysensor4.timer_index = 1;
+        current_quality4 = airqualitysensor4.slope();
+        Thread::wait(1500);
     }
 }
 
@@ -231,18 +255,26 @@ int main() {
     osThreadCreate(osThread(getAirQualityValue), NULL);
     extPower.write(1);
 
-    airqualitysensor.init(analogPin, AirQualityInterrupt);
+    airqualitysensor1.init(analogPin1, AirQualityInterrupt);
+    airqualitysensor2.init(analogPin2, AirQualityInterrupt);
+    airqualitysensor3.init(analogPin3, AirQualityInterrupt);
+    airqualitysensor4.init(analogPin4, AirQualityInterrupt);
+
     while (1) {
 
-        printf("the polution level is %d\r\n", pv);
-        wait_ms(200);
+        wait_ms(2000);
+        printf("Air Quality\r\n PTC1:%d -- PTC2:%d -- PTB0:%d -- PTB1:%d\r\n",
+                       airqualitysensor1.first_vol,
+                       airqualitysensor2.first_vol,
+                       airqualitysensor3.first_vol,
+                       airqualitysensor4.first_vol);
+        wait_ms(2000);
         const int r = modem.connect(CELL_APN, CELL_USER, CELL_PWD);
         if (r != 0) {
             printf("Cannot connect to the network, see serial output");
         } else {
             HTTPSession();
         }
-
-        wait(6);
+        wait(60 * 5);
     }
 }
