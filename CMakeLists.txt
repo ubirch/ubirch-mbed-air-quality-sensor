@@ -188,6 +188,9 @@ target_include_directories(HTTP PUBLIC mbed-http/http_parser
                                        mbed-http/source
                                        mbed-http)
 
+add_library(BME280 BME280/BME280.cpp)
+target_include_directories(BME280 PUBLIC BME280)
+
 add_executable(airquality src/main.cpp src/response.c)
 
 target_link_libraries(airquality mbed-os AirQualitySensor

@@ -7,25 +7,20 @@
 #include <http_response.h>
 #include <http_request.h>
 #include <crypto.h>
-#include"mbed.h"
+#include "mbed.h"
 #include"Air_Quality.h"
 #include "../config.h"
+#include "../BME280/BME280.h"
+#include "sensor.h"
 
+#define PRESSURE_SEA_LEVEL 101325
+#define TEMPERATURE_THRESHOLD 4000
+
+#ifndef MAINDEBUG
 #define PRINTF printf
-
-static int current_quality1 = -1;
-static int current_quality2 = -1;
-static int current_quality3 = -1;
-static int current_quality4 = -1;
-static int pv1 = -1;
-static int pv2 = -1;
-static int pv3 = -1;
-static int pv4 = -1;
-
-static unsigned int interval = 5;
-static int loop_counter = 0;
-
-uint8_t error_flag = 0x00;
+#else
+#define PRINTF(...)
+#endif
 
 PinName analogPin1(PTC1);
 PinName analogPin2(PTC2);
@@ -35,11 +30,32 @@ PinName analogPin4(PTB1);
 DigitalOut extPower(PTC8);
 DigitalOut led1(LED1);
 M66Interface modem(GSM_UART_TX, GSM_UART_RX, GSM_PWRKEY, GSM_POWER, true);
+BME280 bmeSensor(PTB11, PTB10);
 
 AirQuality airqualitysensor1;
 AirQuality airqualitysensor2;
 AirQuality airqualitysensor3;
 AirQuality airqualitysensor4;
+
+static float temperature, pressure, humidity, altitude;
+
+//actual payload template
+static const char *const payload_template = "{\"t\":%d,\"p\":%d,\"h\":%d,\"a\":%d,\"la\":\"%s\",\"lo\":\"%s\",\"ba\":%d,\"lp\":%d,\"e\":%d, \"aq\":[%d, %d, %d, %d]}";
+
+static const char *const message_template = "{\"v\":\"0.0.2\",\"a\":\"%s\",\"k\":\"%s\",\"s\":\"%s\",\"p\":%s}";
+
+static int current_quality1 = -1;
+static int current_quality2 = -1;
+static int current_quality3 = -1;
+static int current_quality4 = -1;
+
+
+bool unsuccessfulSend = false;
+static int temp_threshold = TEMPERATURE_THRESHOLD;
+// internal sensor state
+static unsigned int interval = DEFAULT_INTERVAL;
+static int loop_counter = 0;
+uint8_t error_flag = 0x00;
 
 void dbg_dump(const char *prefix, const uint8_t *b, size_t size) {
     for (int i = 0; i < size; i += 16) {
@@ -77,10 +93,33 @@ void AirQualityInterrupt(void)
 
 int HTTPSession() {
 
+    int aq_val1    = airqualitysensor1.first_vol;
+    int aq_val2    = airqualitysensor2.first_vol;
+    int aq_val3    = airqualitysensor3.first_vol;
+    int aq_val4    = airqualitysensor4.first_vol;
+
+    int rc;
+    int ret;
+
+    int level = 0;
+    int voltage = 0;
+
+    static char lat[32], lon[32];
+
+    uint8_t status = 0;
+    bool gotLocation = false;
+
+    char theIP[20];
+
+    // crypto key of the board
+    static uc_ed25519_key uc_key;
+
+    rtc_datetime_t date_time;
+
+
     // Create a TCP socket
     printf("\n----- Setting up TCP connection -----\r\n");
 
-    char theIP[20];
     bool ipret = modem.queryIP("api.demo.dev.ubirch.com", theIP);
 
     TCPSocket *socket = new TCPSocket();
@@ -96,27 +135,9 @@ int HTTPSession() {
         printf("Connecting over TCPSocket failed... %d\n", connect_result);
         return 1;
     }
-    int rc;
-    int ret;
 
-    int level = 0;
-    int voltage = 0;
 
-    static char lat[32], lon[32];
-
-    uint8_t status = 0;
-    bool gotLocation = false;
-
-    // crypto key of the board
-    static uc_ed25519_key uc_key;
-
-    rtc_datetime_t date_time;
-
-    //actual payload template
-    static const char *const payload_template = "{\"t\":%d,\"p\":%d,\"h\":%d,\"a\":%d,\"la\":\"%s\",\"lo\":\"%s\",\"ba\":%d,\"lp\":%d,\"e\":%d}";
-
-    static const char *const message_template = "{\"v\":\"0.0.2\",\"a\":\"%s\",\"k\":\"%s\",\"s\":\"%s\",\"p\":%s}";
-
+    /* Get battery level, latitude, logitude, time stamp*/
     modem.getModemBattery(&status, &level, &voltage);
     printf("the battery status %d, level %d, voltage %d\r\n", status, level, voltage);
 
@@ -128,25 +149,22 @@ int HTTPSession() {
         PRINTF("lat is %s lon %s\r\n", lat, lon);
     }
 
+    /* Crypto stuff, init and import the ecc key*/
     uc_init();
     uc_import_ecc_key(&uc_key, device_ecc_key, device_ecc_key_len);
 
-    int temperature = airqualitysensor1.first_vol;
-    int pressure    = airqualitysensor2.first_vol;
-    int humidity    = airqualitysensor3.first_vol;
-    int altitude    = airqualitysensor4.first_vol;
     //++++++++++++++++++++++++++++++++++++++++++
     //++++++++++++++++++++++++++++++++++++++++
     // payload structure to be signed
     // Example: '{"t":22.0,"p":1019.5,"h":40.2,"lat":"12.475886","lon":"51.505264","bat":100,"lps":99999}'
     int payload_size = snprintf(NULL, 0, payload_template,
-                                (int) (temperature * 100.0f), pressure * 100, (int) ((humidity) * 100.0f),
+                                (int) (temperature * 100.0f), (int) pressure, (int) ((humidity) * 100.0f),
                                 (int) (altitude * 100.0f),
-                                lat, lon, level, loop_counter, error_flag);
+                                lat, lon, level, loop_counter, error_flag, aq_val1, aq_val2, aq_val3, aq_val4);
     char *payload = (char *) malloc((size_t) payload_size);
     sprintf(payload, payload_template,
-            (int) (temperature * 100.0f), pressure * 100, (int) ((humidity) * 100.0f), (int) (altitude * 100.0f),
-            lat, lon, level, loop_counter, error_flag);
+            (int) (temperature * 100.0f), (int) (pressure), (int) ((humidity) * 100.0f), (int) (altitude * 100.0f),
+            lat, lon, level, loop_counter, error_flag, aq_val1, aq_val2, aq_val3, aq_val4);
 
     error_flag = 0x00;
 
@@ -199,7 +217,7 @@ int HTTPSession() {
     delete socket;
 
     modem.powerDown();
-    powerDownWakeupOnRtc(5 * 60);
+//    powerDownWakeupOnRtc(5 * 60);
 
     return 0;
 }
@@ -208,6 +226,18 @@ void ledBlink(void const *args){
     while(1) {
         led1 = !led1;
         Thread::wait(800);
+    }
+}
+
+void bme_thread(void const *args) {
+
+    while (true) {
+        temperature = bmeSensor.getTemperature();
+        pressure = bmeSensor.getPressure();
+        humidity = bmeSensor.getHumidity();
+        altitude = 44330.0f * (1.0f - (float) pow(pressure / (float) PRESSURE_SEA_LEVEL, 1 / 5.255));
+
+        Thread::wait(10000);
     }
 }
 
@@ -246,13 +276,16 @@ void getAirQualityValue(void const *args) {
 }
 
 osThreadDef(ledBlink, osPriorityNormal, DEFAULT_STACK_SIZE);
+osThreadDef(bme_thread, osPriorityNormal, DEFAULT_STACK_SIZE);
 osThreadDef(getAirQualityValue, osPriorityNormal, DEFAULT_STACK_SIZE);
 
 // Main loop
 int main() {
 
     osThreadCreate(osThread(ledBlink), NULL);
+    osThreadCreate(osThread(bme_thread), NULL);
     osThreadCreate(osThread(getAirQualityValue), NULL);
+
     extPower.write(1);
 
     airqualitysensor1.init(analogPin1, AirQualityInterrupt);
@@ -262,13 +295,15 @@ int main() {
 
     while (1) {
 
-        wait_ms(2000);
         printf("Air Quality\r\n PTC1:%d -- PTC2:%d -- PTB0:%d -- PTB1:%d\r\n",
                        airqualitysensor1.first_vol,
                        airqualitysensor2.first_vol,
                        airqualitysensor3.first_vol,
                        airqualitysensor4.first_vol);
-        wait_ms(2000);
+        wait_ms(200);
+        printf("EnvSensor \r\n Temperature: %f\r\n, Pressure   : %f\r\n, Humidity   : %f\r\n, Altitude   : %f\r\n\r\n",
+                    temperature, pressure, humidity, altitude);
+        wait_ms(200);
         const int r = modem.connect(CELL_APN, CELL_USER, CELL_PWD);
         if (r != 0) {
             printf("Cannot connect to the network, see serial output");
