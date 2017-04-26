@@ -188,6 +188,9 @@ target_include_directories(HTTP PUBLIC mbed-http/http_parser
                                        mbed-http/source
                                        mbed-http)
 
+add_library(DBGUTILS .temp/dbgutil/dbgutil.c)
+target_include_directories(DBGUTILS PUBLIC .temp/dbgutil)
+
 add_library(BME280 BME280/BME280.cpp)
 target_include_directories(BME280 PUBLIC BME280)
 

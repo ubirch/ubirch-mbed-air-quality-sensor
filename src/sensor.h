@@ -20,7 +20,8 @@ extern "C" {
 #define P_PAYLOAD "p"
 #define P_INTERVAL "i"
 #define P_THRESHOLD "th"
-
+#define P_DEVICE_ID "id"
+#define P_TIMESTAMP "ts"
 // error flags
 #define E_SENSOR_FAILED 0b00000001
 #define E_PROTOCOL_FAIL 0b00000010

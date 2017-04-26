@@ -12,6 +12,7 @@
 #include "../config.h"
 #include "../BME280/BME280.h"
 #include "sensor.h"
+#include "response.h"
 
 #define PRESSURE_SEA_LEVEL 101325
 #define TEMPERATURE_THRESHOLD 4000
@@ -32,7 +33,7 @@ BME280 bmeSensor(I2C_SDA, I2C_SCL);
 AirQuality airqualitysensor;
 
 //actual payload template
-static const char *const payload_template = "{\"t\":%d,\"p\":%d,\"h\":%d,\"a\":%d,\"la\":\"%s\",\"lo\":\"%s\",\"ba\":%d,\"lp\":%d,\"e\":%d, \"aq\": %d}";
+static const char *const payload_template = "{\"t\":%d,\"p\":%d,\"h\":%d,\"a\":%d,\"la\":\"%s\",\"lo\":\"%s\",\"ba\":%d,\"lp\":%d,\"e\":%d,\"aq\":%d}";
 static const char *const message_template = "{\"v\":\"0.0.2\",\"a\":\"%s\",\"k\":\"%s\",\"s\":\"%s\",\"p\":%s}";
 
 uint8_t error_flag = 0x00;
@@ -49,17 +50,15 @@ void dbg_dump(const char *prefix, const uint8_t *b, size_t size) {
         if (prefix && strlen(prefix) > 0) printf("%s %06x: ", prefix, i);
         for (int j = 0; j < 16; j++) {
             if ((i + j) < size) printf("%02x", b[i + j]); else printf("  ");
-            if ((j + 1) % 2 == 0) putchar(' ');
+            if ((j+1) % 2 == 0) putchar(' ');
         }
         putchar(' ');
         for (int j = 0; j < 16 && (i + j) < size; j++) {
             putchar(b[i + j] >= 0x20 && b[i + j] <= 0x7E ? b[i + j] : '.');
         }
         printf("\r\n");
-        wait_ms(50);
     }
 }
-
 void dump_response(HttpResponse* res) {
     printf("Status: %d - %s\n", res->get_status_code(), res->get_status_message().c_str());
 
@@ -79,9 +78,60 @@ void AirQualityInterrupt(void)
     airqualitysensor.timer_index = 1;
 }
 
+// convert a number of characters into an unsigned integer value
+static unsigned int to_uint(const char *ptr, size_t len) {
+    unsigned int ret = 0;
+    for (uint8_t i = 0; i < len; i++) {
+        ret = (ret * 10) + (ptr[i] - '0');
+    }
+    return ret;
+}
+
+/*!
+ * Process payload and set configuration parameters from it.
+ * @param payload the payload to use, should be checked
+ */
+void process_payload(char *payload) {
+    jsmntok_t *token;
+    jsmn_parser parser;
+    jsmn_init(&parser);
+
+    // identify the number of tokens in our response, we expect 13
+    const uint8_t token_count = (const uint8_t) jsmn_parse(&parser, payload, strlen(payload), NULL, 0);
+    token = (jsmntok_t *) malloc(sizeof(*token) * token_count);
+
+    // reset parser, parse and store tokens
+    jsmn_init(&parser);
+    if (jsmn_parse(&parser, payload, strlen(payload), token, token_count) == token_count &&
+        token[0].type == JSMN_OBJECT) {
+        uint8_t index = 0;
+        while (++index < token_count) {
+            if (jsoneq(payload, &token[index], P_INTERVAL) == 0 && token[index + 1].type == JSMN_PRIMITIVE) {
+                index++;
+                interval = to_uint(payload + token[index].start, (size_t) token[index].end - token[index].start);
+                PRINTF("Interval: %ds\r\n", interval);
+                wait_ms(50);
+            } else if (jsoneq(payload, &token[index], P_THRESHOLD) == 0 && token[index + 1].type == JSMN_PRIMITIVE) {
+                index++;
+                temp_threshold = to_uint(payload + token[index].start, (size_t) token[index].end - token[index].start);
+                PRINTF("Threshold: %d\r\n", temp_threshold);
+                wait_ms(50);
+            } else {
+                print_token("unknown key:", payload, &token[index]);
+                wait_ms(50);
+                index++;
+            }
+        }
+    } else {
+        error_flag |= E_JSON_FAILED;
+    }
+
+    free(token);
+}
+
 int HTTPSession() {
 
-    int aq_val    = airqualitysensor.first_vol;
+    int aq_val = airqualitysensor.first_vol;
 
     uint8_t status = 0;
     bool gotLocation = false;
@@ -95,14 +145,13 @@ int HTTPSession() {
     static uc_ed25519_key uc_key;
 
     rtc_datetime_t date_time;
-    rtc_config_t rtcConfig;
-
 
     // Create a TCP socket
     printf("\n----- Setting up TCP connection -----\r\n");
 
-    if(!modem.queryIP("api.demo.dev.ubirch.com", theIP)){
+    if (!modem.queryIP("api.demo.dev.ubirch.com", theIP)) {
         PRINTF("Get IP failed\r\n");
+        unsuccessfulSend = true;
         return 1;
     }
 
@@ -111,12 +160,14 @@ int HTTPSession() {
 
     if (open_result != 0) {
         printf("Opening TCPSocket failed... %d\n", open_result);
+        unsuccessfulSend = true;
         return 1;
     }
 
     nsapi_error_t connect_result = socket->connect(theIP, 8080);
     if (connect_result != 0) {
         printf("Connecting over TCPSocket failed... %d\n", connect_result);
+        unsuccessfulSend = true;
         return 1;
     }
 
@@ -134,18 +185,10 @@ int HTTPSession() {
     }
     if (!gotLocation) return 1;
 
-    /* Init RTC and update the RYC date and time*/
-    RTC_GetDefaultConfig(&rtcConfig);
-    RTC_Init(RTC, &rtcConfig);
-    /* Select RTC clock source */
-    /* Enable the RTC 32KHz oscillator */
-    RTC->CR |= RTC_CR_OSCE_MASK;
     /* RTC time counter has to be stopped before setting the date & time in the TSR register */
     RTC_StopTimer(RTC);
     /* Set RTC time to default */
     RTC_SetDatetime(RTC, &date_time);
-    /* Get RTC time */
-    RTC_GetDatetime(RTC, &date_time);
     /* End RTC stuff*/
 
     /* Crypto stuff, init and import the ecc key*/
@@ -188,7 +231,8 @@ int HTTPSession() {
     delete (payload_hash);
 
     PRINTF("--MESSAGE (%d)\r\n", strlen(message));
-    PRINTF("\r\n--MESSAGE\r\n");
+    PRINTF("\r\n--MESSAGE %s\r\n", message);
+    wait_ms(100);
 
     // POST HTTP request
     {
@@ -199,21 +243,38 @@ int HTTPSession() {
         HttpResponse *post_res = post_req->send(message, strlen(message));
         if (!post_res) {
             PRINTF("HttpRequest failed (error code %d)\n", post_req->get_error());
+            unsuccessfulSend = true;
             return 1;
         }
 
         PRINTF("\n----- HTTP POST response -----\n");
-        dump_response(post_res);
+//        dump_response(post_res);
+
+        uc_ed25519_pub_pkcs8 response_key;
+        unsigned char response_signature[SHA512_HASH_SIZE];
+        memset(&response_key, 0xff, sizeof(uc_ed25519_pub_pkcs8));
+        memset(response_signature, 0xf7, SHA512_HASH_SIZE);
+
+        char *response_payload = process_response((char *) post_res->get_body_as_string().c_str(), &response_key,
+                                                  response_signature);
+        wait(1);
+
+        dbg_dump("KEY:", (unsigned char *) &response_key, sizeof(uc_ed25519_pub_pkcs8));
+        dbg_dump("SIG:", response_signature, sizeof(response_signature));
+        PRINTF("PAYLOAD: %s\r\n", response_payload);
+        wait_ms(50);
+        process_payload(response_payload);
 
         free(message);
+        free(response_payload);
 
         delete post_req;
     }
     delete socket;
 
+    unsuccessfulSend = false;
     modem.powerDown();
 //    powerDownWakeupOnRtc(5 * 60);
-
     return 0;
 }
 
@@ -265,19 +326,25 @@ int main() {
 
     airqualitysensor.init(analogPin, AirQualityInterrupt);
 
-    while (1) {
+    rtc_config_t rtcConfig;
+    /* Init RTC and update the RYC date and time*/
+    RTC_GetDefaultConfig(&rtcConfig);
+    RTC_Init(RTC, &rtcConfig);
+    /* Select RTC clock source */
+    /* Enable the RTC 32KHz oscillator */
+    RTC->CR |= RTC_CR_OSCE_MASK;
 
-        PRINTF("Air Quality :: %d\r\n",airqualitysensor.first_vol);
-        wait_ms(100);
-        PRINTF("EnvSensor \r\n Temperature: %f\r\n, Pressure   : %f\r\n, Humidity   : %f\r\n, Altitude   : %f\r\n\r\n",
-                    temperature, pressure, humidity, altitude);
-        wait_ms(100);
-        const int r = modem.connect(CELL_APN, CELL_USER, CELL_PWD);
-        if (r != 0) {
-            PRINTF("Cannot connect to the network, see serial output");
-        } else {
-            HTTPSession();
+    while (1) {
+        if (((int) (temperature * 100)) > temp_threshold || (loop_counter % (MAX_INTERVAL / interval) == 0) ||
+            unsuccessfulSend) {
+            const int r = modem.connect(CELL_APN, CELL_USER, CELL_PWD);
+            if (r != 0) {
+                PRINTF("Cannot connect to the network, see serial output");
+            } else {
+                HTTPSession();
+            }
         }
-        wait(60 * 5);
+        wait(10);
+        loop_counter++;
     }
 }
