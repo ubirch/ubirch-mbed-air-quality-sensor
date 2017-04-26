@@ -22,40 +22,27 @@
 #define PRINTF(...)
 #endif
 
-PinName analogPin1(PTC1);
-PinName analogPin2(PTC2);
-PinName analogPin3(PTB0);
-PinName analogPin4(PTB1);
+PinName analogPin(PTC1);
 
 DigitalOut extPower(PTC8);
 DigitalOut led1(LED1);
 M66Interface modem(GSM_UART_TX, GSM_UART_RX, GSM_PWRKEY, GSM_POWER, true);
-BME280 bmeSensor(PTB11, PTB10);
+BME280 bmeSensor(I2C_SDA, I2C_SCL);
 
-AirQuality airqualitysensor1;
-AirQuality airqualitysensor2;
-AirQuality airqualitysensor3;
-AirQuality airqualitysensor4;
-
-static float temperature, pressure, humidity, altitude;
+AirQuality airqualitysensor;
 
 //actual payload template
-static const char *const payload_template = "{\"t\":%d,\"p\":%d,\"h\":%d,\"a\":%d,\"la\":\"%s\",\"lo\":\"%s\",\"ba\":%d,\"lp\":%d,\"e\":%d, \"aq\":[%d, %d, %d, %d]}";
-
+static const char *const payload_template = "{\"t\":%d,\"p\":%d,\"h\":%d,\"a\":%d,\"la\":\"%s\",\"lo\":\"%s\",\"ba\":%d,\"lp\":%d,\"e\":%d, \"aq\": %d}";
 static const char *const message_template = "{\"v\":\"0.0.2\",\"a\":\"%s\",\"k\":\"%s\",\"s\":\"%s\",\"p\":%s}";
 
-static int current_quality1 = -1;
-static int current_quality2 = -1;
-static int current_quality3 = -1;
-static int current_quality4 = -1;
-
-
+uint8_t error_flag = 0x00;
 bool unsuccessfulSend = false;
+static float temperature, pressure, humidity, altitude;
+static int current_quality1 = -1;
 static int temp_threshold = TEMPERATURE_THRESHOLD;
 // internal sensor state
 static unsigned int interval = DEFAULT_INTERVAL;
 static int loop_counter = 0;
-uint8_t error_flag = 0x00;
 
 void dbg_dump(const char *prefix, const uint8_t *b, size_t size) {
     for (int i = 0; i < size; i += 16) {
@@ -69,6 +56,7 @@ void dbg_dump(const char *prefix, const uint8_t *b, size_t size) {
             putchar(b[i + j] >= 0x20 && b[i + j] <= 0x7E ? b[i + j] : '.');
         }
         printf("\r\n");
+        wait_ms(50);
     }
 }
 
@@ -85,42 +73,38 @@ void dump_response(HttpResponse* res) {
 // Interrupt Handler
 void AirQualityInterrupt(void)
 {
-    AnalogIn sensor(analogPin1);
-    airqualitysensor1.last_vol = airqualitysensor1.first_vol;
-    airqualitysensor1.first_vol = sensor.read()*1000;
-    airqualitysensor1.timer_index = 1;
+    AnalogIn sensor(analogPin);
+    airqualitysensor.last_vol = airqualitysensor.first_vol;
+    airqualitysensor.first_vol = sensor.read()*1000;
+    airqualitysensor.timer_index = 1;
 }
 
 int HTTPSession() {
 
-    int aq_val1    = airqualitysensor1.first_vol;
-    int aq_val2    = airqualitysensor2.first_vol;
-    int aq_val3    = airqualitysensor3.first_vol;
-    int aq_val4    = airqualitysensor4.first_vol;
-
-    int rc;
-    int ret;
-
-    int level = 0;
-    int voltage = 0;
-
-    static char lat[32], lon[32];
+    int aq_val    = airqualitysensor.first_vol;
 
     uint8_t status = 0;
     bool gotLocation = false;
-
+    int rc;
+    int ret;
+    int level = 0;
+    int voltage = 0;
+    static char lat[32], lon[32];
     char theIP[20];
-
     // crypto key of the board
     static uc_ed25519_key uc_key;
 
     rtc_datetime_t date_time;
+    rtc_config_t rtcConfig;
 
 
     // Create a TCP socket
     printf("\n----- Setting up TCP connection -----\r\n");
 
-    bool ipret = modem.queryIP("api.demo.dev.ubirch.com", theIP);
+    if(!modem.queryIP("api.demo.dev.ubirch.com", theIP)){
+        PRINTF("Get IP failed\r\n");
+        return 1;
+    }
 
     TCPSocket *socket = new TCPSocket();
     nsapi_error_t open_result = socket->open(&modem);
@@ -148,23 +132,37 @@ int HTTPSession() {
                date_time.year, date_time.month, date_time.day, date_time.hour, date_time.minute, date_time.second);
         PRINTF("lat is %s lon %s\r\n", lat, lon);
     }
+    if (!gotLocation) return 1;
+
+    /* Init RTC and update the RYC date and time*/
+    RTC_GetDefaultConfig(&rtcConfig);
+    RTC_Init(RTC, &rtcConfig);
+    /* Select RTC clock source */
+    /* Enable the RTC 32KHz oscillator */
+    RTC->CR |= RTC_CR_OSCE_MASK;
+    /* RTC time counter has to be stopped before setting the date & time in the TSR register */
+    RTC_StopTimer(RTC);
+    /* Set RTC time to default */
+    RTC_SetDatetime(RTC, &date_time);
+    /* Get RTC time */
+    RTC_GetDatetime(RTC, &date_time);
+    /* End RTC stuff*/
 
     /* Crypto stuff, init and import the ecc key*/
     uc_init();
     uc_import_ecc_key(&uc_key, device_ecc_key, device_ecc_key_len);
 
-    //++++++++++++++++++++++++++++++++++++++++++
     //++++++++++++++++++++++++++++++++++++++++
     // payload structure to be signed
     // Example: '{"t":22.0,"p":1019.5,"h":40.2,"lat":"12.475886","lon":"51.505264","bat":100,"lps":99999}'
     int payload_size = snprintf(NULL, 0, payload_template,
                                 (int) (temperature * 100.0f), (int) pressure, (int) ((humidity) * 100.0f),
                                 (int) (altitude * 100.0f),
-                                lat, lon, level, loop_counter, error_flag, aq_val1, aq_val2, aq_val3, aq_val4);
+                                lat, lon, level, loop_counter, error_flag, aq_val);
     char *payload = (char *) malloc((size_t) payload_size);
     sprintf(payload, payload_template,
             (int) (temperature * 100.0f), (int) (pressure), (int) ((humidity) * 100.0f), (int) (altitude * 100.0f),
-            lat, lon, level, loop_counter, error_flag, aq_val1, aq_val2, aq_val3, aq_val4);
+            lat, lon, level, loop_counter, error_flag, aq_val);
 
     error_flag = 0x00;
 
@@ -190,12 +188,9 @@ int HTTPSession() {
     delete (payload_hash);
 
     PRINTF("--MESSAGE (%d)\r\n", strlen(message));
-    PRINTF(message);
     PRINTF("\r\n--MESSAGE\r\n");
 
-    printf("Connected over TCP to httpbin.org:80\n");
-
-    // POST request to httpbin.org
+    // POST HTTP request
     {
         HttpRequest *post_req = new HttpRequest(socket, HTTP_POST,
                                                 "http://api.demo.dev.ubirch.com/api/avatarService/v1/device/update");
@@ -203,11 +198,11 @@ int HTTPSession() {
 
         HttpResponse *post_res = post_req->send(message, strlen(message));
         if (!post_res) {
-            printf("HttpRequest failed (error code %d)\n", post_req->get_error());
+            PRINTF("HttpRequest failed (error code %d)\n", post_req->get_error());
             return 1;
         }
 
-        printf("\n----- HTTP POST response -----\n");
+        PRINTF("\n----- HTTP POST response -----\n");
         dump_response(post_res);
 
         free(message);
@@ -242,36 +237,16 @@ void bme_thread(void const *args) {
 }
 
 void getAirQualityValue(void const *args) {
-    AnalogIn sensor1(analogPin1);
-    AnalogIn sensor2(analogPin2);
-    AnalogIn sensor3(analogPin3);
-    AnalogIn sensor4(analogPin4);
+    AnalogIn sensor(analogPin);
 
     while(1) {
         //Air sensor 1
-        airqualitysensor1.last_vol = airqualitysensor1.first_vol;
-        airqualitysensor1.first_vol = sensor1.read() * 1000;
-        airqualitysensor1.timer_index = 1;
-        current_quality1 = airqualitysensor1.slope();
+        airqualitysensor.last_vol = airqualitysensor.first_vol;
+        airqualitysensor.first_vol = sensor.read() * 1000;
+        airqualitysensor.timer_index = 1;
+        current_quality1 = airqualitysensor.slope();
 
-        //Air sensor 2
-        airqualitysensor2.last_vol = airqualitysensor2.first_vol;
-        airqualitysensor2.first_vol = sensor2.read() * 1000;
-        airqualitysensor2.timer_index = 1;
-        current_quality2 = airqualitysensor2.slope();
-
-        //Air sensor 2
-        airqualitysensor3.last_vol = airqualitysensor3.first_vol;
-        airqualitysensor3.first_vol = sensor3.read() * 1000;
-        airqualitysensor3.timer_index = 1;
-        current_quality3 = airqualitysensor3.slope();
-
-        //Air sensor 2
-        airqualitysensor4.last_vol = airqualitysensor4.first_vol;
-        airqualitysensor4.first_vol = sensor4.read() * 1000;
-        airqualitysensor4.timer_index = 1;
-        current_quality4 = airqualitysensor4.slope();
-        Thread::wait(1500);
+        Thread::wait(10000);
     }
 }
 
@@ -288,25 +263,18 @@ int main() {
 
     extPower.write(1);
 
-    airqualitysensor1.init(analogPin1, AirQualityInterrupt);
-    airqualitysensor2.init(analogPin2, AirQualityInterrupt);
-    airqualitysensor3.init(analogPin3, AirQualityInterrupt);
-    airqualitysensor4.init(analogPin4, AirQualityInterrupt);
+    airqualitysensor.init(analogPin, AirQualityInterrupt);
 
     while (1) {
 
-        printf("Air Quality\r\n PTC1:%d -- PTC2:%d -- PTB0:%d -- PTB1:%d\r\n",
-                       airqualitysensor1.first_vol,
-                       airqualitysensor2.first_vol,
-                       airqualitysensor3.first_vol,
-                       airqualitysensor4.first_vol);
-        wait_ms(200);
-        printf("EnvSensor \r\n Temperature: %f\r\n, Pressure   : %f\r\n, Humidity   : %f\r\n, Altitude   : %f\r\n\r\n",
+        PRINTF("Air Quality :: %d\r\n",airqualitysensor.first_vol);
+        wait_ms(100);
+        PRINTF("EnvSensor \r\n Temperature: %f\r\n, Pressure   : %f\r\n, Humidity   : %f\r\n, Altitude   : %f\r\n\r\n",
                     temperature, pressure, humidity, altitude);
-        wait_ms(200);
+        wait_ms(100);
         const int r = modem.connect(CELL_APN, CELL_USER, CELL_PWD);
         if (r != 0) {
-            printf("Cannot connect to the network, see serial output");
+            PRINTF("Cannot connect to the network, see serial output");
         } else {
             HTTPSession();
         }
