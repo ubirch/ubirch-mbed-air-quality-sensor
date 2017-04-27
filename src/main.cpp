@@ -320,15 +320,15 @@ int main() {
     RTC->CR |= RTC_CR_OSCE_MASK;
 
     while (1) {
-//        if (((int) (temperature * 100)) > temp_threshold || (loop_counter % (MAX_INTERVAL / interval) == 0) ||
-//            unsuccessfulSend) {
-//            const int r = modem.connect(CELL_APN, CELL_USER, CELL_PWD);
-//            if (r != 0) {
-//                PRINTF("Cannot connect to the network, see serial output");
-//            } else {
-//                HTTPSession();
-//            }
-//        }
+        if (((int) (temperature * 100)) > temp_threshold || (loop_counter % (MAX_INTERVAL / interval) == 0) ||
+            unsuccessfulSend) {
+            const int r = modem.connect(CELL_APN, CELL_USER, CELL_PWD);
+            if (r != 0) {
+                PRINTF("Cannot connect to the network, see serial output");
+            } else {
+                HTTPSession();
+            }
+        }
 
         printf("%d..\r\n", airqualitysensor.first_vol);
         wait(10);
