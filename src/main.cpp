@@ -33,7 +33,7 @@ BME280 bmeSensor(I2C_SDA, I2C_SCL);
 AirQuality airqualitysensor;
 
 //actual payload template
-static const char *const payload_template = "{\"t\":%d,\"p\":%d,\"h\":%d,\"a\":%d,\"la\":\"%s\",\"lo\":\"%s\",\"ba\":%d,\"lp\":%d,\"e\":%d,\"aq\":%d}";
+static const char *const payload_template = "{\"t\":%d,\"p\":%d,\"h\":%d,\"a\":%d,\"la\":\"%s\",\"lo\":\"%s\",\"ba\":%d,\"lp\":%d,\"e\":%d,\"aq\":%d,\"aqr\":%d}";
 static const char *const message_template = "{\"v\":\"0.0.2\",\"a\":\"%s\",\"k\":\"%s\",\"s\":\"%s\",\"p\":%s}";
 
 uint8_t error_flag = 0x00;
@@ -66,7 +66,7 @@ void dump_response(HttpResponse* res) {
     for (size_t ix = 0; ix < res->get_headers_length(); ix++) {
         printf("\t%s: %s\n", res->get_headers_fields()[ix]->c_str(), res->get_headers_values()[ix]->c_str());
     }
-    printf("\nBody (%d bytes):\n\n%s\n", res->get_body_length(), res->get_body_as_string().c_str());
+    printf("\nBody (%d bytes):\n\n%s\n", (int)res->get_body_length(), res->get_body_as_string().c_str());
 }
 
 // Interrupt Handler
@@ -76,6 +76,7 @@ void AirQualityInterrupt(void)
     airqualitysensor.last_vol = airqualitysensor.first_vol;
     airqualitysensor.first_vol = sensor.read()*1000;
     airqualitysensor.timer_index = 1;
+    current_quality1 = airqualitysensor.slope();
 }
 
 // convert a number of characters into an unsigned integer value
@@ -131,7 +132,8 @@ void process_payload(char *payload) {
 
 int HTTPSession() {
 
-    int aq_val = airqualitysensor.first_vol;
+    int aqVal = airqualitysensor.first_vol;
+    int aqRefVal = airqualitysensor.aqRefVal;
 
     uint8_t status = 0;
     bool gotLocation = false;
@@ -201,11 +203,11 @@ int HTTPSession() {
     int payload_size = snprintf(NULL, 0, payload_template,
                                 (int) (temperature * 100.0f), (int) pressure, (int) ((humidity) * 100.0f),
                                 (int) (altitude * 100.0f),
-                                lat, lon, level, loop_counter, error_flag, aq_val);
+                                lat, lon, level, loop_counter, error_flag, aqRefVal, aqVal);
     char *payload = (char *) malloc((size_t) payload_size);
     sprintf(payload, payload_template,
             (int) (temperature * 100.0f), (int) (pressure), (int) ((humidity) * 100.0f), (int) (altitude * 100.0f),
-            lat, lon, level, loop_counter, error_flag, aq_val);
+            lat, lon, level, loop_counter, error_flag, aqRefVal, aqVal);
 
     error_flag = 0x00;
 
@@ -286,7 +288,6 @@ void ledBlink(void const *args){
 }
 
 void bme_thread(void const *args) {
-
     while (true) {
         temperature = bmeSensor.getTemperature();
         pressure = bmeSensor.getPressure();
@@ -297,32 +298,16 @@ void bme_thread(void const *args) {
     }
 }
 
-void getAirQualityValue(void const *args) {
-    AnalogIn sensor(analogPin);
-
-    while(1) {
-        //Air sensor 1
-        airqualitysensor.last_vol = airqualitysensor.first_vol;
-        airqualitysensor.first_vol = sensor.read() * 1000;
-        airqualitysensor.timer_index = 1;
-        current_quality1 = airqualitysensor.slope();
-
-        Thread::wait(10000);
-    }
-}
-
 osThreadDef(ledBlink, osPriorityNormal, DEFAULT_STACK_SIZE);
 osThreadDef(bme_thread, osPriorityNormal, DEFAULT_STACK_SIZE);
-osThreadDef(getAirQualityValue, osPriorityNormal, DEFAULT_STACK_SIZE);
 
 // Main loop
 int main() {
 
+    extPower.write(1);
+
     osThreadCreate(osThread(ledBlink), NULL);
     osThreadCreate(osThread(bme_thread), NULL);
-    osThreadCreate(osThread(getAirQualityValue), NULL);
-
-    extPower.write(1);
 
     airqualitysensor.init(analogPin, AirQualityInterrupt);
 
@@ -335,15 +320,17 @@ int main() {
     RTC->CR |= RTC_CR_OSCE_MASK;
 
     while (1) {
-        if (((int) (temperature * 100)) > temp_threshold || (loop_counter % (MAX_INTERVAL / interval) == 0) ||
-            unsuccessfulSend) {
-            const int r = modem.connect(CELL_APN, CELL_USER, CELL_PWD);
-            if (r != 0) {
-                PRINTF("Cannot connect to the network, see serial output");
-            } else {
-                HTTPSession();
-            }
-        }
+//        if (((int) (temperature * 100)) > temp_threshold || (loop_counter % (MAX_INTERVAL / interval) == 0) ||
+//            unsuccessfulSend) {
+//            const int r = modem.connect(CELL_APN, CELL_USER, CELL_PWD);
+//            if (r != 0) {
+//                PRINTF("Cannot connect to the network, see serial output");
+//            } else {
+//                HTTPSession();
+//            }
+//        }
+
+        printf("%d..\r\n", airqualitysensor.first_vol);
         wait(10);
         loop_counter++;
     }
