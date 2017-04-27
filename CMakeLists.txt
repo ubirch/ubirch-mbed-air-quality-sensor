@@ -188,8 +188,8 @@ target_include_directories(HTTP PUBLIC mbed-http/http_parser
                                        mbed-http/source
                                        mbed-http)
 
-add_library(DBGUTILS .temp/dbgutil/dbgutil.c)
-target_include_directories(DBGUTILS PUBLIC .temp/dbgutil)
+add_library(DBGUTILS dbgutil/dbgutil.c)
+target_include_directories(DBGUTILS PUBLIC dbgutil)
 
 add_library(BME280 BME280/BME280.cpp)
 target_include_directories(BME280 PUBLIC BME280)
@@ -204,6 +204,8 @@ target_link_libraries(airquality mbed-os AirQualitySensor
         JSMN
         CRYPTO
         HTTP
+        BME280
+        DBGUTILS
         )
 
 add_custom_target(airquality-compile ALL

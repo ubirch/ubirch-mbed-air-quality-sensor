@@ -8,20 +8,22 @@
 #include <http_request.h>
 #include <crypto.h>
 #include "mbed.h"
-#include"Air_Quality.h"
+#include "../Grove_Air_Quality_Sensor_Library/Air_Quality.h"
 #include "../config.h"
 #include "../BME280/BME280.h"
 #include "sensor.h"
 #include "response.h"
 
+#include "../dbgutil/dbgutil.h"
+
 #define PRESSURE_SEA_LEVEL 101325
 #define TEMPERATURE_THRESHOLD 4000
 
-#ifndef MAINDEBUG
-#define PRINTF printf
-#else
-#define PRINTF(...)
-#endif
+//#ifndef MAINDEBUG
+//#define PRINTF printf
+//#else
+//#define PRINTF(...)
+//#endif
 
 PinName analogPin(PTC1);
 
@@ -30,7 +32,8 @@ DigitalOut led1(LED1);
 M66Interface modem(GSM_UART_TX, GSM_UART_RX, GSM_PWRKEY, GSM_POWER, true);
 BME280 bmeSensor(I2C_SDA, I2C_SCL);
 
-AirQuality airqualitysensor;
+//AirQuality airqualitysensor;
+AirQuality airqualitysensor(PTC1);
 
 //actual payload template
 static const char *const payload_template = "{\"t\":%d,\"p\":%d,\"h\":%d,\"a\":%d,\"la\":\"%s\",\"lo\":\"%s\",\"ba\":%d,\"lp\":%d,\"e\":%d,\"aq\":%d,\"aqr\":%d}";
@@ -45,20 +48,6 @@ static int temp_threshold = TEMPERATURE_THRESHOLD;
 static unsigned int interval = DEFAULT_INTERVAL;
 static int loop_counter = 0;
 
-void dbg_dump(const char *prefix, const uint8_t *b, size_t size) {
-    for (int i = 0; i < size; i += 16) {
-        if (prefix && strlen(prefix) > 0) printf("%s %06x: ", prefix, i);
-        for (int j = 0; j < 16; j++) {
-            if ((i + j) < size) printf("%02x", b[i + j]); else printf("  ");
-            if ((j+1) % 2 == 0) putchar(' ');
-        }
-        putchar(' ');
-        for (int j = 0; j < 16 && (i + j) < size; j++) {
-            putchar(b[i + j] >= 0x20 && b[i + j] <= 0x7E ? b[i + j] : '.');
-        }
-        printf("\r\n");
-    }
-}
 void dump_response(HttpResponse* res) {
     printf("Status: %d - %s\n", res->get_status_code(), res->get_status_message().c_str());
 
@@ -72,9 +61,10 @@ void dump_response(HttpResponse* res) {
 // Interrupt Handler
 void AirQualityInterrupt(void)
 {
-    AnalogIn sensor(analogPin);
+//    AnalogIn sensor(analogPin);
     airqualitysensor.last_vol = airqualitysensor.first_vol;
-    airqualitysensor.first_vol = sensor.read()*1000;
+//    airqualitysensor.first_vol = sensor.read()*1000;
+    airqualitysensor.first_vol = airqualitysensor.getAQSensorValue();
     airqualitysensor.timer_index = 1;
     current_quality1 = airqualitysensor.slope();
 }
@@ -261,8 +251,8 @@ int HTTPSession() {
                                                   response_signature);
         wait(1);
 
-        dbg_dump("KEY:", (unsigned char *) &response_key, sizeof(uc_ed25519_pub_pkcs8));
-        dbg_dump("SIG:", response_signature, sizeof(response_signature));
+        hex_dump("KEY:", (unsigned char *) &response_key, sizeof(uc_ed25519_pub_pkcs8));
+        hex_dump("SIG:", response_signature, sizeof(response_signature));
         PRINTF("PAYLOAD: %s\r\n", response_payload);
         wait_ms(50);
         process_payload(response_payload);
