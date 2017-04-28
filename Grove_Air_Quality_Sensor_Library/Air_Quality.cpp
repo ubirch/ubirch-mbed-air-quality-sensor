@@ -56,9 +56,8 @@ void AirQuality::avgVoltage()
     }
 }
 
-void AirQuality::init(PinName pin, void (*IRQ)(void))
+void AirQuality::init(void (*IRQ)(void))
 {
-//    AnalogIn _sensor(pin);
     unsigned char i = 0;
     aqRefVal = 0;
     PRINTF("Air Quality Sensor Starting Up...(20s)\n\r");
@@ -96,8 +95,8 @@ void AirQuality::init(PinName pin, void (*IRQ)(void))
 
 int AirQuality::getAQSensorValue() {
     int val = _sensor.read()*1000;
-    printf("getaq%d ...\r\n", val);
-    wait_ms(100);
+//    printf("getaq%d ...\r\n", val);
+//    wait_ms(100);
     return val;
 }
 
@@ -125,11 +124,8 @@ int AirQuality::slope()
             return 2;
         } else {
             avgVoltage();
-            wait_ms(200);
-
             PRINTF("sensor_value:%d",first_vol);
             PRINTF("\t Air fresh\n\r");
-            wait_ms(200);
             timer_index = 0;
             return 3;
         }

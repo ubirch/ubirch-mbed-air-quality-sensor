@@ -35,7 +35,7 @@ public:
     bool timer_index;
     bool error;
     int aqRefVal;
-    void init(PinName pin, void (*IRQ)(void));
+    void init(void (*IRQ)(void));
     int slope();
     int getAQSensorValue();
 private:

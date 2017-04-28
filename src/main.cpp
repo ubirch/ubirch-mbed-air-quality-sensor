@@ -19,30 +19,21 @@
 #define PRESSURE_SEA_LEVEL 101325
 #define TEMPERATURE_THRESHOLD 4000
 
-//#ifndef MAINDEBUG
-//#define PRINTF printf
-//#else
-//#define PRINTF(...)
-//#endif
-
-PinName analogPin(PTC1);
-
 DigitalOut extPower(PTC8);
 DigitalOut led1(LED1);
 M66Interface modem(GSM_UART_TX, GSM_UART_RX, GSM_PWRKEY, GSM_POWER, true);
 BME280 bmeSensor(I2C_SDA, I2C_SCL);
 
-//AirQuality airqualitysensor;
-AirQuality airqualitysensor(PTC1);
+AirQuality airqualitysensor(PTC0);
 
 //actual payload template
 static const char *const payload_template = "{\"t\":%d,\"p\":%d,\"h\":%d,\"a\":%d,\"la\":\"%s\",\"lo\":\"%s\",\"ba\":%d,\"lp\":%d,\"e\":%d,\"aq\":%d,\"aqr\":%d}";
 static const char *const message_template = "{\"v\":\"0.0.2\",\"a\":\"%s\",\"k\":\"%s\",\"s\":\"%s\",\"p\":%s}";
 
 uint8_t error_flag = 0x00;
-bool unsuccessfulSend = false;
+int unsuccessfulSend = -1;
 static float temperature, pressure, humidity, altitude;
-static int current_quality1 = -1;
+static int currentAirQuality  = -1;
 static int temp_threshold = TEMPERATURE_THRESHOLD;
 // internal sensor state
 static unsigned int interval = DEFAULT_INTERVAL;
@@ -61,12 +52,10 @@ void dump_response(HttpResponse* res) {
 // Interrupt Handler
 void AirQualityInterrupt(void)
 {
-//    AnalogIn sensor(analogPin);
     airqualitysensor.last_vol = airqualitysensor.first_vol;
-//    airqualitysensor.first_vol = sensor.read()*1000;
     airqualitysensor.first_vol = airqualitysensor.getAQSensorValue();
     airqualitysensor.timer_index = 1;
-    current_quality1 = airqualitysensor.slope();
+    currentAirQuality = airqualitysensor.slope();
 }
 
 // convert a number of characters into an unsigned integer value
@@ -143,7 +132,6 @@ int HTTPSession() {
 
     if (!modem.queryIP("api.demo.dev.ubirch.com", theIP)) {
         PRINTF("Get IP failed\r\n");
-        unsuccessfulSend = true;
         return 1;
     }
 
@@ -152,14 +140,12 @@ int HTTPSession() {
 
     if (open_result != 0) {
         printf("Opening TCPSocket failed... %d\n", open_result);
-        unsuccessfulSend = true;
         return 1;
     }
 
     nsapi_error_t connect_result = socket->connect(theIP, 8080);
     if (connect_result != 0) {
         printf("Connecting over TCPSocket failed... %d\n", connect_result);
-        unsuccessfulSend = true;
         return 1;
     }
 
@@ -193,11 +179,11 @@ int HTTPSession() {
     int payload_size = snprintf(NULL, 0, payload_template,
                                 (int) (temperature * 100.0f), (int) pressure, (int) ((humidity) * 100.0f),
                                 (int) (altitude * 100.0f),
-                                lat, lon, level, loop_counter, error_flag, aqRefVal, aqVal);
+                                lat, lon, level, loop_counter, error_flag, aqVal, aqRefVal);
     char *payload = (char *) malloc((size_t) payload_size);
     sprintf(payload, payload_template,
             (int) (temperature * 100.0f), (int) (pressure), (int) ((humidity) * 100.0f), (int) (altitude * 100.0f),
-            lat, lon, level, loop_counter, error_flag, aqRefVal, aqVal);
+            lat, lon, level, loop_counter, error_flag, aqVal, aqRefVal);
 
     error_flag = 0x00;
 
@@ -223,7 +209,7 @@ int HTTPSession() {
     delete (payload_hash);
 
     PRINTF("--MESSAGE (%d)\r\n", strlen(message));
-    PRINTF("\r\n--MESSAGE %s\r\n", message);
+    printf("\r\n--MESSAGE %s\r\n", message);
     wait_ms(100);
 
     // POST HTTP request
@@ -264,7 +250,6 @@ int HTTPSession() {
     }
     delete socket;
 
-    unsuccessfulSend = false;
     modem.powerDown();
 //    powerDownWakeupOnRtc(5 * 60);
     return 0;
@@ -294,12 +279,13 @@ osThreadDef(bme_thread, osPriorityNormal, DEFAULT_STACK_SIZE);
 // Main loop
 int main() {
 
+    printf("Fire  up the sensors\r\n");
     extPower.write(1);
 
     osThreadCreate(osThread(ledBlink), NULL);
     osThreadCreate(osThread(bme_thread), NULL);
 
-    airqualitysensor.init(analogPin, AirQualityInterrupt);
+    airqualitysensor.init(AirQualityInterrupt);
 
     rtc_config_t rtcConfig;
     /* Init RTC and update the RYC date and time*/
@@ -316,11 +302,12 @@ int main() {
             if (r != 0) {
                 PRINTF("Cannot connect to the network, see serial output");
             } else {
-                HTTPSession();
+                unsuccessfulSend = HTTPSession();
             }
         }
 
-        printf("%d..\r\n", airqualitysensor.first_vol);
+        PRINTF("%d..\r\n", airqualitysensor.first_vol);
+        printf(".");
         wait(10);
         loop_counter++;
     }
