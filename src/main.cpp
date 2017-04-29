@@ -200,6 +200,7 @@ int HTTPSession() {
 
     int message_size = snprintf(NULL, 0, message_template, auth_hash, pub_key_hash, payload_hash, payload);
     char *message = (char *) malloc((size_t) (message_size + 1));
+
     sprintf(message, message_template, auth_hash, pub_key_hash, payload_hash, payload);
     PRINTF("message_size%d\r\n", message_size);
 
@@ -219,6 +220,8 @@ int HTTPSession() {
         post_req->set_header("Content-Type", "application/json");
 
         HttpResponse *post_res = post_req->send(message, strlen(message));
+        free(message);
+
         if (!post_res) {
             PRINTF("HttpRequest failed (error code %d)\n", post_req->get_error());
             unsuccessfulSend = true;
@@ -243,7 +246,6 @@ int HTTPSession() {
         wait_ms(50);
         process_payload(response_payload);
 
-        free(message);
         free(response_payload);
 
         delete post_req;
@@ -306,8 +308,8 @@ int main() {
             }
         }
 
-        PRINTF("%d..\r\n", airqualitysensor.first_vol);
-        printf(".");
+        printf("%d..\r\n", airqualitysensor.first_vol);
+//        printf("...\r\n");
         wait(10);
         loop_counter++;
     }
