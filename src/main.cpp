@@ -180,7 +180,7 @@ int HTTPSession() {
                                 (int) (temperature * 100.0f), (int) pressure, (int) ((humidity) * 100.0f),
                                 (int) (altitude * 100.0f),
                                 lat, lon, level, loop_counter, error_flag, aqVal, aqRefVal);
-    char *payload = (char *) malloc((size_t) payload_size);
+    char *payload = (char *) malloc((size_t) payload_size + 1);
     sprintf(payload, payload_template,
             (int) (temperature * 100.0f), (int) (pressure), (int) ((humidity) * 100.0f), (int) (altitude * 100.0f),
             lat, lon, level, loop_counter, error_flag, aqVal, aqRefVal);
@@ -208,6 +208,7 @@ int HTTPSession() {
     delete (auth_hash);
     delete (pub_key_hash);
     delete (payload_hash);
+    free(payload);
 
     PRINTF("--MESSAGE (%d)\r\n", strlen(message));
     printf("\r\n--MESSAGE %s\r\n", message);
