@@ -37,7 +37,7 @@ static int currentAirQuality  = -1;
 static int temp_threshold = TEMPERATURE_THRESHOLD;
 // internal sensor state
 static unsigned int interval = DEFAULT_INTERVAL;
-static int loop_counter = 0;
+static int16_t loop_counter = 0;
 
 void dump_response(HttpResponse* res) {
     printf("Status: %d - %s\n", res->get_status_code(), res->get_status_message().c_str());
@@ -282,6 +282,7 @@ osThreadDef(bme_thread, osPriorityNormal, DEFAULT_STACK_SIZE);
 // Main loop
 int main() {
 
+    int connectFail = 0;
     printf("Fire  up the sensors\r\n");
     extPower.write(1);
 
@@ -303,15 +304,22 @@ int main() {
             unsuccessfulSend) {
             const int r = modem.connect(CELL_APN, CELL_USER, CELL_PWD);
             if (r != 0) {
+                connectFail++;
                 PRINTF("Cannot connect to the network, see serial output");
             } else {
                 unsuccessfulSend = HTTPSession();
+                if(!unsuccessfulSend) connectFail = 0;
+                else connectFail++;
             }
+        }
+        if (connectFail >= 5){
+            NVIC_SystemReset();
         }
 
         printf("%d..\r\n", airqualitysensor.first_vol);
-//        printf("...\r\n");
-        wait(10);
-        loop_counter++;
+        if(!connectFail) {
+            wait(10);
+            loop_counter++;
+        }
     }
 }
