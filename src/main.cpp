@@ -136,16 +136,19 @@ int HTTPSession() {
     }
 
     TCPSocket *socket = new TCPSocket();
+    // TODO make sure you close the socket or delet socket before returning error handlers
     nsapi_error_t open_result = socket->open(&modem);
 
     if (open_result != 0) {
         printf("Opening TCPSocket failed... %d\n", open_result);
+        delete socket;
         return 1;
     }
 
     nsapi_error_t connect_result = socket->connect(theIP, 8080);
     if (connect_result != 0) {
         printf("Connecting over TCPSocket failed... %d\n", connect_result);
+        delete socket;
         return 1;
     }
 
@@ -161,7 +164,10 @@ int HTTPSession() {
                date_time.year, date_time.month, date_time.day, date_time.hour, date_time.minute, date_time.second);
         PRINTF("lat is %s lon %s\r\n", lat, lon);
     }
-    if (!gotLocation) return 1;
+    if (!gotLocation) {
+        delete socket;
+        return 1;
+    }
 
     /* RTC time counter has to be stopped before setting the date & time in the TSR register */
     RTC_StopTimer(RTC);
@@ -226,6 +232,7 @@ int HTTPSession() {
         if (!post_res) {
             PRINTF("HttpRequest failed (error code %d)\n", post_req->get_error());
             unsuccessfulSend = true;
+            delete socket;
             return 1;
         }
 
