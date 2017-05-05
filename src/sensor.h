@@ -29,6 +29,7 @@ extern "C" {
 #define E_JSON_FAILED   0b00001000
 #define E_NO_MEMORY     0b10000000
 #define E_NO_CONNECTION 0b01000000
+#define E_WDOG_RESET    0b10000001
 
 #ifdef __cplusplus
 }

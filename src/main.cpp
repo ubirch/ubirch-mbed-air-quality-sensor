@@ -7,7 +7,8 @@
 #include <http_response.h>
 #include <http_request.h>
 #include <crypto.h>
-#include "mbed.h"
+#include <fsl_wdog.h>
+//#include "mbed.h"
 #include "../Grove_Air_Quality_Sensor_Library/Air_Quality.h"
 #include "../config.h"
 #include "../BME280/BME280.h"
@@ -286,13 +287,37 @@ void bme_thread(void const *args) {
 osThreadDef(ledBlink, osPriorityNormal, DEFAULT_STACK_SIZE);
 osThreadDef(bme_thread, osPriorityNormal, DEFAULT_STACK_SIZE);
 
+#define WDOG_WCT_INSTRUCITON_COUNT (256U)
+
+static void WaitWctClose(WDOG_Type *base)
+{
+    /* Accessing register by bus clock */
+    for (uint32_t i = 0; i < WDOG_WCT_INSTRUCITON_COUNT; i++)
+    {
+        (void)base->RSTCNT;
+    }
+}
+
+//    WATCHDOG STUFF
+static WDOG_Type *wdog_base = WDOG;
+static RCM_Type *rcm_base = RCM;
+uint16_t wdog_reset_count = 0;
+wdog_test_config_t test_config;
+
+
 // Main loop
 int main() {
+
 
     int connectFail = 0;
     printf("Fire  up the sensors\r\n");
     extPower.write(1);
 
+    if ((RCM_GetPreviousResetSources(rcm_base) & kRCM_SourceWdog))
+    {
+        WDOG_ClearResetCount(wdog_base);
+        error_flag = E_WDOG_RESET;
+    }
     osThreadCreate(osThread(ledBlink), NULL);
     osThreadCreate(osThread(bme_thread), NULL);
 
@@ -305,6 +330,13 @@ int main() {
     /* Select RTC clock source */
     /* Enable the RTC 32KHz oscillator */
     RTC->CR |= RTC_CR_OSCE_MASK;
+
+    wdog_config_t config;
+    WDOG_GetDefaultConfig(&config);
+    config.timeoutValue = 0x2BF20U; //180 seconds ;
+
+    WDOG_Init(wdog_base, &config);
+    WaitWctClose(wdog_base);
 
     while (1) {
         if (((int) (temperature * 100)) > temp_threshold || (loop_counter % (MAX_INTERVAL / interval) == 0) ||
@@ -319,8 +351,12 @@ int main() {
                 else connectFail++;
             }
         }
+        WDOG_Refresh(wdog_base);
+
         if (connectFail >= 5){
-            NVIC_SystemReset();
+            modem.powerDown();
+            connectFail = 0;
+//            NVIC_SystemReset();
         }
 
         printf("%d..\r\n", airqualitysensor.first_vol);
