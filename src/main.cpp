@@ -8,7 +8,7 @@
 #include <http_request.h>
 #include <crypto.h>
 #include <fsl_wdog.h>
-//#include "mbed.h"
+#include "mbed.h"
 #include "../Grove_Air_Quality_Sensor_Library/Air_Quality.h"
 #include "../config.h"
 #include "../BME280/BME280.h"
@@ -24,8 +24,11 @@ DigitalOut extPower(PTC8);
 DigitalOut led1(LED1);
 M66Interface modem(GSM_UART_TX, GSM_UART_RX, GSM_PWRKEY, GSM_POWER, true);
 BME280 bmeSensor(I2C_SDA, I2C_SCL);
-
 AirQuality airqualitysensor(PTC0);
+
+//    WATCHDOG STUFF
+static WDOG_Type *wdog_base = WDOG;
+static RCM_Type *rcm_base = RCM;
 
 //actual payload template
 static const char *const payload_template = "{\"t\":%d,\"p\":%d,\"h\":%d,\"a\":%d,\"la\":\"%s\",\"lo\":\"%s\",\"ba\":%d,\"lp\":%d,\"e\":%d,\"aq\":%d,\"aqr\":%d}";
@@ -131,7 +134,7 @@ int HTTPSession() {
     // Create a TCP socket
     printf("\n----- Setting up TCP connection -----\r\n");
 
-    if (!modem.queryIP("api.demo.dev.ubirch.com", theIP)) {
+    if (!modem.queryIP(UTCP_HOST, theIP)) {
         PRINTF("Get IP failed\r\n");
         return 1;
     }
@@ -146,7 +149,7 @@ int HTTPSession() {
         return 1;
     }
 
-    nsapi_error_t connect_result = socket->connect(theIP, 8080);
+    nsapi_error_t connect_result = socket->connect(theIP, UTCP_PORT);
     if (connect_result != 0) {
         printf("Connecting over TCPSocket failed... %d\n", connect_result);
         delete socket;
@@ -223,8 +226,7 @@ int HTTPSession() {
 
     // POST HTTP request
     {
-        HttpRequest *post_req = new HttpRequest(socket, HTTP_POST,
-                                                "http://api.demo.dev.ubirch.com/api/avatarService/v1/device/update");
+        HttpRequest *post_req = new HttpRequest(socket, HTTP_POST, UHTTP_URL);
         post_req->set_header("Content-Type", "application/json");
 
         HttpResponse *post_res = post_req->send(message, strlen(message));
@@ -298,13 +300,6 @@ static void WaitWctClose(WDOG_Type *base)
     }
 }
 
-//    WATCHDOG STUFF
-static WDOG_Type *wdog_base = WDOG;
-static RCM_Type *rcm_base = RCM;
-uint16_t wdog_reset_count = 0;
-wdog_test_config_t test_config;
-
-
 // Main loop
 int main() {
 
@@ -317,6 +312,7 @@ int main() {
     {
         WDOG_ClearResetCount(wdog_base);
         error_flag = E_WDOG_RESET;
+        printf("\r\nWatchDog reset the board\r\n");
     }
     osThreadCreate(osThread(ledBlink), NULL);
     osThreadCreate(osThread(bme_thread), NULL);
@@ -351,6 +347,7 @@ int main() {
                 else connectFail++;
             }
         }
+        //Feed the DOG
         WDOG_Refresh(wdog_base);
 
         if (connectFail >= 5){
@@ -359,7 +356,7 @@ int main() {
 //            NVIC_SystemReset();
         }
 
-        printf("%d..\r\n", airqualitysensor.first_vol);
+        printf("%d, loop:%d..\r\n", airqualitysensor.first_vol, loop_counter);
         if(!connectFail) {
             wait(10);
             loop_counter++;
