@@ -19,14 +19,15 @@
 
 #define PRESSURE_SEA_LEVEL 101325
 #define TEMPERATURE_THRESHOLD 4000
-
 DigitalOut extPower(PTC8);
+
 DigitalOut led1(LED1);
 M66Interface modem(GSM_UART_TX, GSM_UART_RX, GSM_PWRKEY, GSM_POWER, true);
 BME280 bmeSensor(I2C_SDA, I2C_SCL);
 AirQuality airqualitysensor(PTC0);
 
 //    WATCHDOG STUFF
+#define WDOG_WCT_INSTRUCITON_COUNT (256U)
 static WDOG_Type *wdog_base = WDOG;
 static RCM_Type *rcm_base = RCM;
 
@@ -162,7 +163,7 @@ int HTTPSession() {
     printf("the battery status %d, level %d, voltage %d\r\n", status, level, voltage);
 
     for (int lc = 0; lc < 3 && !gotLocation; lc++) {
-        gotLocation = modem.get_location_date(lat, lon, &date_time);
+        gotLocation = modem.get_location_date(lon, lat, &date_time);
         PRINTF("setting current time from GSM\r\n");
         PRINTF("%04hd-%02hd-%02hd %02hd:%02hd:%02hd\r\n",
                date_time.year, date_time.month, date_time.day, date_time.hour, date_time.minute, date_time.second);
@@ -288,8 +289,6 @@ void bme_thread(void const *args) {
 
 osThreadDef(ledBlink, osPriorityNormal, DEFAULT_STACK_SIZE);
 osThreadDef(bme_thread, osPriorityNormal, DEFAULT_STACK_SIZE);
-
-#define WDOG_WCT_INSTRUCITON_COUNT (256U)
 
 static void WaitWctClose(WDOG_Type *base)
 {
