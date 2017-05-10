@@ -1,6 +1,6 @@
 # ubirch-mbed-air-quality-sensor
 
-#Ubirch Air-Quality Sensor
+# Ubirch Air-Quality Sensor
 
 Measure the quality of the air using Seeed Groove-Air quality sensor v1.3 and send data to backend using UBRIDGE sensor
 
@@ -12,7 +12,7 @@ Public-key cryptography is implemented to exchange the messages between the boar
 The message is sent to the backend in a predefined interval of time, these intervals can also be configured by sending a configuration message to the device from the server. 
 If the sensor temperature is more than the threshold limit then the message is sent more often.
 
-#Getting Started
+# Getting Started
 - Clone the [ubirch-mbed-air-quality-sensor](https://github.com/ubirch/ubirch-mbed-air-quality-sensor)
 - Run `mbed deploy` to find and add missing libraries
 - Run `mbed update` to update the repo to latest revision/ branch 
@@ -25,7 +25,7 @@ If the sensor temperature is more than the threshold limit then the message is s
  
    Copy/ rename the [config.h.template](https://github.com/ubirch/mbed-os-env-sensor/blob/master/config.h.template) file as `config.h` and add the credentials 
 
-#Building
+# Building
 - to compile the program using mbed build tool run `mbed compile`
 - to clean and rebuild the directory again run `mbed compile -c`
 
