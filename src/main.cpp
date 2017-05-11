@@ -307,12 +307,12 @@ int main() {
     printf("Fire  up the sensors\r\n");
     extPower.write(1);
 
-    if ((RCM_GetPreviousResetSources(rcm_base) & kRCM_SourceWdog))
-    {
+    if ((RCM_GetPreviousResetSources(rcm_base) & kRCM_SourceWdog)) {
         WDOG_ClearResetCount(wdog_base);
         error_flag = E_WDOG_RESET;
         printf("\r\nWatchDog reset the board\r\n");
-    }
+    } else error_flag = (uint8_t)RCM_GetPreviousResetSources(rcm_base);
+
     osThreadCreate(osThread(ledBlink), NULL);
     osThreadCreate(osThread(bme_thread), NULL);
 
@@ -342,21 +342,25 @@ int main() {
                 PRINTF("Cannot connect to the network, see serial output");
             } else {
                 unsuccessfulSend = HTTPSession();
-                if(!unsuccessfulSend) connectFail = 0;
-                else connectFail++;
+                if (!unsuccessfulSend) {
+                    connectFail = 0;
+                } else {
+                    connectFail++;
+                    modem.powerDown();
+                }
             }
         }
         //Feed the DOG
         WDOG_Refresh(wdog_base);
 
-        if (connectFail >= 5){
+        if (connectFail >= 5) {
             modem.powerDown();
             connectFail = 0;
 //            NVIC_SystemReset();
         }
 
         printf("%d, loop:%d..\r\n", airqualitysensor.first_vol, loop_counter);
-        if(!connectFail) {
+        if (!connectFail) {
             wait(10);
             loop_counter++;
         }
