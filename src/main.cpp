@@ -32,17 +32,20 @@ static WDOG_Type *wdog_base = WDOG;
 static RCM_Type *rcm_base = RCM;
 
 //actual payload template
-static const char *const payload_template = "{\"t\":%d,\"p\":%d,\"h\":%d,\"a\":%d,\"la\":\"%s\",\"lo\":\"%s\",\"ba\":%d,\"lp\":%d,\"e\":%d,\"aq\":%d,\"aqr\":%d}";
-static const char *const message_template = "{\"v\":\"0.0.2\",\"a\":\"%s\",\"k\":\"%s\",\"s\":\"%s\",\"p\":%s}";
-
+static const char *const payload_template = "{\"t\":%d,\"p\":%d,\"h\":%d,\"a\":%d,\"la\":\"%s\",\"lo\":\"%s\",\"ba\":%d,\"lp\":%d,\"e\":%d,\"aq\":%d,\"aqr\":%d,\"ts\":\"%s\"}";
+static const char *const message_template = "{\"v\":\"0.0.3\",\"a\":\"%s\",\"k\":\"%s\",\"s\":\"%s\",\"p\":%s}";
+static const char *const timeStamp_template = "%d-%d-%dT%d:%d:%d.%dZ"; //“2017-05-09T10:25:41.836Z”
 uint8_t error_flag = 0x00;
+
 int unsuccessfulSend = -1;
 static float temperature, pressure, humidity, altitude;
 static int currentAirQuality  = -1;
 static int temp_threshold = TEMPERATURE_THRESHOLD;
 // internal sensor state
 static unsigned int interval = DEFAULT_INTERVAL;
+int measureIndex = DEFAULT_MEASURE_INTERVAL;
 static int16_t loop_counter = 0;
+bool sendPacket = false;
 
 void dump_response(HttpResponse* res) {
     printf("Status: %d - %s\n", res->get_status_code(), res->get_status_message().c_str());
@@ -116,21 +119,131 @@ void process_payload(char *payload) {
 
 int HTTPSession() {
 
-    int aqVal = airqualitysensor.first_vol;
-    int aqRefVal = airqualitysensor.aqRefVal;
-
     uint8_t status = 0;
-    bool gotLocation = false;
     int rc;
     int ret;
-    int level = 0;
     int voltage = 0;
-    static char lat[32], lon[32];
     char theIP[20];
     // crypto key of the board
     static uc_ed25519_key uc_key;
 
     rtc_datetime_t date_time;
+
+
+    //Payload array stuff
+    payload_t pVal[measureIndex];
+
+
+    for (int i = 0; i < measureIndex; ++i) {
+        bool gotLocation = false;
+        int zone = 0;
+
+        pVal[i].temp = (int) (temperature * 100.0f);
+        pVal[i].pressure = (int) pressure;
+        pVal[i].humidity = (int) ((humidity) * 100.0f);
+        pVal[i].altitide = (int) (altitude * 100.0f);
+        pVal[i].aq = 111;//airqualitysensor.first_vol;
+        pVal[i].aqr = 121; //airqualitysensor.aqRefVal;
+        pVal[i].lp = loop_counter;
+
+
+        /* Get battery level, latitude, logitude, time stamp*/
+        modem.getModemBattery(&status, &pVal[i].batLevel, &voltage);
+        PRINTF("the battery status %d, level %d, voltage %d\r\n", status, pVal[i].batLevel, voltage);
+
+        for (int lc = 0; lc < 3 && !gotLocation; lc++) {
+            gotLocation = modem.get_location_date(pVal[i].lat, pVal[i].lon, &date_time, &zone);
+            PRINTF("setting current time from GSM\r\n");
+            PRINTF("%04hd-%02hd-%02hd %02hd:%02hd:%02hd\r\n",
+                   date_time.year, date_time.month, date_time.day, date_time.hour, date_time.minute,
+                   date_time.second);
+            PRINTF("lat is %s lon %s\r\n", pVal[i].lat, pVal[i].lon);
+            wait_ms(500);
+        }
+        if (!gotLocation) return 1;
+
+        sprintf(pVal[i].timeStamp, timeStamp_template, date_time.year,
+                date_time.month, date_time.day, date_time.hour, date_time.minute, date_time.second, zone);
+        pVal[i].errorFlag = error_flag;
+
+        error_flag = 0x00;
+
+        /* RTC time counter has to be stopped before setting the date & time in the TSR register */
+        RTC_StopTimer(RTC);
+        /* Set RTC time to default */
+        RTC_SetDatetime(RTC, &date_time);
+        /* End RTC stuff*/
+
+
+        WDOG_Refresh(wdog_base);
+                loop_counter++;
+
+    } // Payload into array for loop
+
+    int payloadSize = 0;
+
+    int pValSize[measureIndex];
+    for (int j = 0; j < measureIndex; ++j) {
+
+        pValSize[j] = snprintf(NULL, 0, payload_template, pVal[j].temp,
+                               pVal[j].pressure,
+                               pVal[j].humidity,
+                               pVal[j].altitide,
+                               pVal[j].lat,
+                               pVal[j].lon,
+                               pVal[j].batLevel,
+                               pVal[j].lp,
+                               pVal[j].errorFlag,
+                               pVal[j].aq,
+                               pVal[j].aqr,
+                               pVal[j].timeStamp);
+        PRINTF("\r\npValSize %d\r\n", pValSize[j]);
+        payloadSize += pValSize[j];
+    }
+
+    payloadSize += measureIndex - 1;
+    payloadSize += 2;
+
+    //++++++++++++++++++++++++++++++++++++++++
+    // payload structure to be signed
+    // Example: '{"t":22.0,"p":1019.5,"h":40.2,"lat":"12.475886","lon":"51.505264","bat":100,"lps":99999}'
+    char *payload = (char *) malloc((size_t) payloadSize + 1);
+    memset(payload, 0, (size_t) (payloadSize + 1));
+    strcpy(payload, "[");
+    int getplen = 0;
+    for (int k = 0; k < measureIndex; ++k) {
+        char *zaz = (char *) malloc(size_t(pValSize[k]));
+        memset(zaz, 0, (size_t) ((pValSize[k])));
+        sprintf(zaz, payload_template, pVal[k].temp,
+                pVal[k].pressure,
+                pVal[k].humidity,
+                pVal[k].altitide,
+                pVal[k].lat,
+                pVal[k].lon,
+                pVal[k].batLevel,
+                pVal[k].lp,
+                pVal[k].errorFlag,
+                pVal[k].aq,
+                pVal[k].aqr,
+                pVal[k].timeStamp);
+        printf("zaz::: %s\r\n", zaz);
+        if (k == 0) {
+            strncat(payload, zaz, (size_t) pValSize[k]);
+            getplen = pValSize[k];
+        } else {
+            strcat(payload, ",");
+            strncat(payload, zaz, (size_t) pValSize[k]);
+            getplen += pValSize[k];
+        }
+        PRINTF("the previous size %d\r\n", getplen);
+//        printf("THE P_PAYLOAD:: %s\r\n", payload);
+        free(zaz);
+    }
+    strcat(payload, "]");
+
+    //payload arrray loop
+    printf("%d::%d\r\n\r\n", payloadSize, (int) strlen(payload));
+    printf("PAYLOAD:: %s\r\n", payload);
 
     // Create a TCP socket
     printf("\n----- Setting up TCP connection -----\r\n");
@@ -157,46 +270,9 @@ int HTTPSession() {
         return 1;
     }
 
-
-    /* Get battery level, latitude, logitude, time stamp*/
-    modem.getModemBattery(&status, &level, &voltage);
-    printf("the battery status %d, level %d, voltage %d\r\n", status, level, voltage);
-
-    for (int lc = 0; lc < 3 && !gotLocation; lc++) {
-        gotLocation = modem.get_location_date(lon, lat, &date_time);
-        PRINTF("setting current time from GSM\r\n");
-        PRINTF("%04hd-%02hd-%02hd %02hd:%02hd:%02hd\r\n",
-               date_time.year, date_time.month, date_time.day, date_time.hour, date_time.minute, date_time.second);
-        PRINTF("lat is %s lon %s\r\n", lat, lon);
-    }
-    if (!gotLocation) {
-        delete socket;
-        return 1;
-    }
-
-    /* RTC time counter has to be stopped before setting the date & time in the TSR register */
-    RTC_StopTimer(RTC);
-    /* Set RTC time to default */
-    RTC_SetDatetime(RTC, &date_time);
-    /* End RTC stuff*/
-
     /* Crypto stuff, init and import the ecc key*/
     uc_init();
     uc_import_ecc_key(&uc_key, device_ecc_key, device_ecc_key_len);
-
-    //++++++++++++++++++++++++++++++++++++++++
-    // payload structure to be signed
-    // Example: '{"t":22.0,"p":1019.5,"h":40.2,"lat":"12.475886","lon":"51.505264","bat":100,"lps":99999}'
-    int payload_size = snprintf(NULL, 0, payload_template,
-                                (int) (temperature * 100.0f), (int) pressure, (int) ((humidity) * 100.0f),
-                                (int) (altitude * 100.0f),
-                                lat, lon, level, loop_counter, error_flag, aqVal, aqRefVal);
-    char *payload = (char *) malloc((size_t) payload_size + 1);
-    sprintf(payload, payload_template,
-            (int) (temperature * 100.0f), (int) (pressure), (int) ((humidity) * 100.0f), (int) (altitude * 100.0f),
-            lat, lon, level, loop_counter, error_flag, aqVal, aqRefVal);
-
-    error_flag = 0x00;
 
     const char *imei = modem.get_imei();
 
@@ -250,7 +326,6 @@ int HTTPSession() {
 
         char *response_payload = process_response((char *) post_res->get_body_as_string().c_str(), &response_key,
                                                   response_signature);
-        wait(1);
 
         hex_dump("KEY:", (unsigned char *) &response_key, sizeof(uc_ed25519_pub_pkcs8));
         hex_dump("SIG:", response_signature, sizeof(response_signature));
@@ -264,7 +339,7 @@ int HTTPSession() {
     }
     delete socket;
 
-    modem.powerDown();
+//    modem.powerDown();
 //    powerDownWakeupOnRtc(5 * 60);
     return 0;
 }
@@ -311,12 +386,12 @@ int main() {
         WDOG_ClearResetCount(wdog_base);
         error_flag = E_WDOG_RESET;
         printf("\r\nWatchDog reset the board\r\n");
-    } else error_flag = (uint8_t)RCM_GetPreviousResetSources(rcm_base);
+    } else error_flag = (uint8_t) RCM_GetPreviousResetSources(rcm_base);
 
     osThreadCreate(osThread(ledBlink), NULL);
     osThreadCreate(osThread(bme_thread), NULL);
 
-    airqualitysensor.init(AirQualityInterrupt);
+//    airqualitysensor.init(AirQualityInterrupt);
 
     rtc_config_t rtcConfig;
     /* Init RTC and update the RYC date and time*/
@@ -334,13 +409,20 @@ int main() {
     WaitWctClose(wdog_base);
 
     while (1) {
-        if (((int) (temperature * 100)) > temp_threshold || (loop_counter % (MAX_INTERVAL / interval) == 0) ||
+        if (((int) (temperature * 100)) > temp_threshold ||
+            (loop_counter % (MAX_INTERVAL / interval) == 0) ||
             unsuccessfulSend) {
-            const int r = modem.connect(CELL_APN, CELL_USER, CELL_PWD);
-            if (r != 0) {
-                connectFail++;
-                PRINTF("Cannot connect to the network, see serial output");
+            printf("gprs %d\r\n", modem.checkGPRS());
+            if (modem.checkGPRS() != 1) {
+                const int r = modem.connect(CELL_APN, CELL_USER, CELL_PWD);
+                if (r != 0) {
+                    connectFail++;
+                    PRINTF("Cannot connect to the network, see serial output");
+                }
             } else {
+//                if (loop_counter % (MAX_INTERVAL / interval) == 0) sendPacket = true;
+//                else sendPacket = false;
+
                 unsuccessfulSend = HTTPSession();
                 if (!unsuccessfulSend) {
                     connectFail = 0;
@@ -354,8 +436,8 @@ int main() {
         WDOG_Refresh(wdog_base);
 
         if (connectFail >= 5) {
-            modem.powerDown();
             connectFail = 0;
+            modem.powerDown();
 //            NVIC_SystemReset();
         }
 
@@ -366,3 +448,5 @@ int main() {
         }
     }
 }
+
+
