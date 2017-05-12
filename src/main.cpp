@@ -143,6 +143,7 @@ int HTTPSession() {
     TCPSocket *socket = new TCPSocket();
     // TODO make sure you close the socket or delet socket before returning error handlers
     nsapi_error_t open_result = socket->open(&modem);
+    socket->set_timeout(0);
 
     if (open_result != 0) {
         printf("Opening TCPSocket failed... %d\n", open_result);
