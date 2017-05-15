@@ -104,13 +104,13 @@ int AirQuality::slope()
             PRINTF("High pollution! Force signal active.\n\r");
             timer_index = 0;
             avgVoltage();
-            return 0;
+            return 3;
         } else if((first_vol - last_vol > 400 && first_vol < 700) || first_vol - vol_standard > 150) {
             PRINTF("sensor_value:%d",first_vol);
             PRINTF("\t High pollution!\n\r");
             timer_index = 0;
             avgVoltage();
-            return 1;
+            return 2;
 
         } else if((first_vol-last_vol > 200 && first_vol < 700) || first_vol - vol_standard > 50) {
             //PRINTF(first_vol-last_vol);
@@ -118,13 +118,13 @@ int AirQuality::slope()
             PRINTF("\t Low pollution!\n\r");
             timer_index = 0;
             avgVoltage();
-            return 2;
+            return 1;
         } else {
             avgVoltage();
             PRINTF("sensor_value:%d",first_vol);
             PRINTF("\t Air fresh\n\r");
             timer_index = 0;
-            return 3;
+            return 0;
         }
     }
     return -1;

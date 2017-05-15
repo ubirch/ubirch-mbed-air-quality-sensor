@@ -37,10 +37,8 @@ extern int error_flag;
 void print_token(const char *prefix, const char *response, jsmntok_t *token) {
     const size_t token_size = (const size_t) (token->end - token->start);
     PRINTF("%s ", prefix);
-    wait_ms(100);
     for (int i = 0; i < token_size; i++) putchar(*(response + token->start + i));
     PRINTF("\r\n");
-    wait_ms(100);
 }
 
 //! @brief JSMN helper function to compare token values
@@ -105,7 +103,6 @@ char *process_response(char *response, uc_ed25519_pub_pkcs8 *key, unsigned char 
                 if (!uc_base64_decode(response + token[index].start, (size_t) (token[index].end - token[index].start),
                                       (unsigned char *) key, &key_length)) {
                     PRINTF("ERROR decoding key.\r\n");
-                    wait_ms(100);
                 }
             } else if (jsoneq(response, &token[index], P_SIGNATURE) == 0 && token[index + 1].type == JSMN_STRING) {
                 index++;
@@ -118,7 +115,6 @@ char *process_response(char *response, uc_ed25519_pub_pkcs8 *key, unsigned char 
                                       (size_t) (token[index].end - token[index].start),
                                       signature, &hash_length)) {
                     PRINTF("ERROR decoding hash digest.\r\n");
-                    wait_ms(100);
                 }
             } else if (jsoneq(response, &token[index], P_PAYLOAD) == 0 && token[index + 1].type == JSMN_OBJECT) {
                 index++;
