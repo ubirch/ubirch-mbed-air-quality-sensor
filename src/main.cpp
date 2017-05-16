@@ -295,6 +295,9 @@ int HTTPSession() {
     printf("\r\nOpen the TCP Socket\r\n");
 
     TCPSocket *socket = new TCPSocket();
+    // Set the timeout to 0
+    socket->set_timeout(0);
+
     // TODO make sure you close the socket or delet socket before returning error handlers
     nsapi_error_t open_result = socket->open(&modem);
 
