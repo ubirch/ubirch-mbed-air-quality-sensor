@@ -29,13 +29,16 @@ extern "C" {
 #define P_TIMESTAMP        "ts"
 #define P_MEASURE_INTERVAL "im"
 // error flags
-#define E_SENSOR_FAILED 0b00000001
-#define E_PROTOCOL_FAIL 0b00000010
-#define E_SIG_VRFY_FAIL 0b00000100
-#define E_JSON_FAILED   0b00001000
-#define E_NO_MEMORY     0b10000000
-#define E_NO_CONNECTION 0b01000000
-#define E_WDOG_RESET    0b10000001
+#define E_SENSOR_FAILED 0b00000001 //1
+#define E_PROTOCOL_FAIL 0b00000010 //2
+#define E_SIG_VRFY_FAIL 0b00000100 //4
+#define E_JSON_FAILED   0b00001000 //8
+#define E_NO_MEMORY     0b10000000 //128
+#define E_NO_CONNECTION 0b01000000 //64
+#define E_WDOG_RESET    0b10000001 //129
+#define E_POR           0b10000010 //130
+#define E_MODEM_RESET   0b10000011 //131
+#define E_TCP_FAIL      0b10000100 //132
 
 typedef struct {
     int temp;

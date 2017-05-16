@@ -284,7 +284,7 @@ int HTTPSession() {
     delete (payload_hash);
     free(payload);
 
-    printf("\r\nMESSAGE::(%d):: %s\r\n", (int)strlen(message), message);
+    printf("\r\nMESSAGE::(%d):: %s\r\n", (int) strlen(message), message);
 
     // Create a TCP socket
     if (!modem.queryIP(UTCP_HOST, theIP)) {
@@ -344,11 +344,7 @@ int HTTPSession() {
         delete post_req;
     }
     delete socket;
-    measureIndex++;
-    printf("measureIndex::%d\r\n", measureIndex);
-
 //    modem.powerDown();
-//    powerDownWakeupOnRtc(5 * 60);
     return 0;
 }
 
@@ -417,24 +413,25 @@ int main() {
 
     while (1) {
 
-        if (!modem.checkGPRS()) {
-            if(modem.connect(CELL_APN, CELL_USER, CELL_PWD)){
+        if (modem.checkGPRS() == 0) {
+            if (modem.connect(CELL_APN, CELL_USER, CELL_PWD)) {
                 connectFail++;
                 PRINTF("Cannot connect to the network, see serial output");
-            }
+            } else connectFail = 0;
         }
-        printf("connect fail %d\r\n", connectFail);
-        if (!connectFail) {
-            unsuccessfulSend = HTTPSession();
-            if (!unsuccessfulSend) {
-                connectFail = 0;
-            } else connectFail++;
+
+        unsuccessfulSend = HTTPSession();
+
+        if (!unsuccessfulSend) {
+            connectFail = 0;
         } else connectFail++;
 
         if (connectFail >= 5) {
-            connectFail = 0;
             modem.powerDown();
-            //NVIC_SystemReset();
+            error_flag = E_MODEM_RESET;
+            if (connectFail > 6) {
+                NVIC_SystemReset();
+            }
         }
 
         //Feed the DOG
