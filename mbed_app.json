@@ -6,7 +6,9 @@
     "OS_STKSIZE=1",
     "OS_TIMERS=3",
     "OS_FIFOSZ=4",
-    "OS_MUTEXCNT=1"
+    "OS_MUTEXCNT=1",
+    "CURVED25519_SMALL=1",
+    "WOLFSSL_BASE64_ENCODE=1"
   ],
   "target_overrides": {
     "*": {

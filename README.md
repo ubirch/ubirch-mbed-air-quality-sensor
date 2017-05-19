@@ -16,11 +16,8 @@ If the sensor temperature is more than the threshold limit then the message is s
 - Clone the [ubirch-mbed-air-quality-sensor](https://github.com/ubirch/ubirch-mbed-air-quality-sensor)
 - Run `mbed deploy` to find and add missing libraries
 - Run `mbed update` to update the repo to latest revision/ branch 
-- add target `mbed target UBIRCH1`
+- add target `mbed target UBRIDGE`
 - add toolchain `mbed toolchain GCC_ARM`
-- Enable `WOLFSSL_BASE64_ENCODE` functionality in WolfSSL by adding 
-
-  `#define WOLFSSL_BASE64_ENCODE` to wolfSSL/user_settings.h
 - The board gets the credentials like **Cell APN, username, password, MQTT username, password, host URL and port number** from `config.h` file, which is ignored by git.
  
    Copy/ rename the [config.h.template](https://github.com/ubirch/mbed-os-env-sensor/blob/master/config.h.template) file as `config.h` and add the credentials 
