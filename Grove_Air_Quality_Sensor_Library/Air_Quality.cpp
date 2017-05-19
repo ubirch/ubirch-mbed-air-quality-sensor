@@ -49,7 +49,6 @@ void AirQuality::avgVoltage()
         i=0;
         if(!aqRefVal) aqRefVal = (int)vol_standard;
         PRINTF("Vol_standard in 2 minutes: %d\n\r",vol_standard);
-        wait_ms(100);
     } else {
         temp+=first_vol;
         i++;
@@ -61,7 +60,6 @@ void AirQuality::init(void (*IRQ)(void))
     unsigned char i = 0;
     aqRefVal = 0;
     PRINTF("Air Quality Sensor Starting Up...(20s)\n\r");
-    wait(20); //20s
     init_voltage = _sensor.read() * 1000; // boost the value to be on a 0 -> 1000 scale for compatibility
     PRINTF("The initial voltage is %d%% of source \n\r",init_voltage/10);
     while(init_voltage) {
@@ -77,7 +75,6 @@ void AirQuality::init(void (*IRQ)(void))
             // The sensor is not ready, wait a bit for it to cool off
             i++;
             PRINTF("Sensor not ready (%d), try %d/5, waiting 60 seconds...\n\r",init_voltage,i);
-            wait(60);//60s
             init_voltage = (int)_sensor.read() * 1000;
             if(i==5) {
                 // After 5 minutes warn user that the sensor may be broken
@@ -107,13 +104,13 @@ int AirQuality::slope()
             PRINTF("High pollution! Force signal active.\n\r");
             timer_index = 0;
             avgVoltage();
-            return 0;
+            return 3;
         } else if((first_vol - last_vol > 400 && first_vol < 700) || first_vol - vol_standard > 150) {
             PRINTF("sensor_value:%d",first_vol);
             PRINTF("\t High pollution!\n\r");
             timer_index = 0;
             avgVoltage();
-            return 1;
+            return 2;
 
         } else if((first_vol-last_vol > 200 && first_vol < 700) || first_vol - vol_standard > 50) {
             //PRINTF(first_vol-last_vol);
@@ -121,13 +118,13 @@ int AirQuality::slope()
             PRINTF("\t Low pollution!\n\r");
             timer_index = 0;
             avgVoltage();
-            return 2;
+            return 1;
         } else {
             avgVoltage();
             PRINTF("sensor_value:%d",first_vol);
             PRINTF("\t Air fresh\n\r");
             timer_index = 0;
-            return 3;
+            return 0;
         }
     }
     return -1;

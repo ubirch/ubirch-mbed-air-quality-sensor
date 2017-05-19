@@ -17,32 +17,37 @@
 
 #include "../dbgutil/dbgutil.h"
 
-#define PRESSURE_SEA_LEVEL 101325
+#define PRESSURE_SEA_LEVEL    101325
 #define TEMPERATURE_THRESHOLD 4000
-DigitalOut extPower(PTC8);
 
+DigitalOut extPower(PTC8);
 DigitalOut led1(LED1);
 M66Interface modem(GSM_UART_TX, GSM_UART_RX, GSM_PWRKEY, GSM_POWER, true);
 BME280 bmeSensor(I2C_SDA, I2C_SCL);
 AirQuality airqualitysensor(PTC0);
 
-//    WATCHDOG STUFF
+//    WATCHDOG TIMER
 #define WDOG_WCT_INSTRUCITON_COUNT (256U)
 static WDOG_Type *wdog_base = WDOG;
 static RCM_Type *rcm_base = RCM;
 
 //actual payload template
-static const char *const payload_template = "{\"t\":%d,\"p\":%d,\"h\":%d,\"a\":%d,\"la\":\"%s\",\"lo\":\"%s\",\"ba\":%d,\"lp\":%d,\"e\":%d,\"aq\":%d,\"aqr\":%d}";
-static const char *const message_template = "{\"v\":\"0.0.2\",\"a\":\"%s\",\"k\":\"%s\",\"s\":\"%s\",\"p\":%s}";
+static const char *const payload_template = "{\"t\":%d,\"p\":%d,\"h\":%d,\"a\":%d,\"la\":\"%s\",\"lo\":\"%s\",\"ba\":%d,\"lp\":%d,\"e\":%d,\"aq\":%d,\"aqr\":%d,\"ts\":\"%s\"}";
+static const char *const message_template = "{\"fw\":\"V.3.1\",\"v\":\"0.0.3\",\"a\":\"%s\",\"k\":\"%s\",\"s\":\"%s\",\"p\":%s}";
+static const char *const timeStamp_template = "%d-%d-%dT%d:%d:%d.%dZ"; //“2017-05-09T10:25:41.836Z”
 
-uint8_t error_flag = 0x00;
-int unsuccessfulSend = -1;
+//BME Sensor Variables
 static float temperature, pressure, humidity, altitude;
-static int currentAirQuality  = -1;
 static int temp_threshold = TEMPERATURE_THRESHOLD;
 // internal sensor state
-static unsigned int interval = DEFAULT_INTERVAL;
+static int sendInterval = DEFAULT_SEND_INTERVAL;
+static int measureIndex = DEFAULT_MEASURE_INDEX;
+static int readInterval = DEFAULT_READ_INTERVAL;
+
+uint8_t error_flag = 0x00;
 static int16_t loop_counter = 0;
+bool unsuccessfulSend = false;
+bool aqPolluted = false;
 
 void dump_response(HttpResponse* res) {
     printf("Status: %d - %s\n", res->get_status_code(), res->get_status_message().c_str());
@@ -55,12 +60,14 @@ void dump_response(HttpResponse* res) {
 }
 
 // Interrupt Handler
-void AirQualityInterrupt(void)
-{
+void AirQualityInterrupt(void) {
     airqualitysensor.last_vol = airqualitysensor.first_vol;
     airqualitysensor.first_vol = airqualitysensor.getAQSensorValue();
     airqualitysensor.timer_index = 1;
-    currentAirQuality = airqualitysensor.slope();
+    if (airqualitysensor.slope() > 3) {
+        printf("aq..\r\n");
+        aqPolluted = true;
+    }
 }
 
 // convert a number of characters into an unsigned integer value
@@ -93,17 +100,20 @@ void process_payload(char *payload) {
         while (++index < token_count) {
             if (jsoneq(payload, &token[index], P_INTERVAL) == 0 && token[index + 1].type == JSMN_PRIMITIVE) {
                 index++;
-                interval = to_uint(payload + token[index].start, (size_t) token[index].end - token[index].start);
-                PRINTF("Interval: %ds\r\n", interval);
-                wait_ms(50);
+                sendInterval = to_uint(payload + token[index].start, (size_t) token[index].end - token[index].start);
+                sendInterval = sendInterval < MAX_SEND_INTERVAL && sendInterval > 0 ? sendInterval : MAX_SEND_INTERVAL;
+                PRINTF("Interval: %ds\r\n", sendInterval);
             } else if (jsoneq(payload, &token[index], P_THRESHOLD) == 0 && token[index + 1].type == JSMN_PRIMITIVE) {
                 index++;
                 temp_threshold = to_uint(payload + token[index].start, (size_t) token[index].end - token[index].start);
                 PRINTF("Threshold: %d\r\n", temp_threshold);
-                wait_ms(50);
+            } else if (jsoneq(payload, &token[index], P_MEASURE_INTERVAL) == 0 && token[index + 1].type == JSMN_PRIMITIVE) {
+                index++;
+                readInterval = to_uint(payload + token[index].start, (size_t) token[index].end - token[index].start);
+                readInterval  = readInterval < MAX_READ_INTERVAL && readInterval > 0 ? readInterval : MAX_READ_INTERVAL;
+                PRINTF("Measure Interval: %d\r\n", readInterval);
             } else {
                 print_token("unknown key:", payload, &token[index]);
-                wait_ms(50);
                 index++;
             }
         }
@@ -111,92 +121,146 @@ void process_payload(char *payload) {
         error_flag |= E_JSON_FAILED;
     }
 
+    measureIndex = sendInterval/readInterval;
+    measureIndex = measureIndex < MAX_MEASURE_INDEX ? measureIndex : MAX_MEASURE_INDEX;
+
     free(token);
 }
 
 int HTTPSession() {
 
-    int aqVal = airqualitysensor.first_vol;
-    int aqRefVal = airqualitysensor.aqRefVal;
-
     uint8_t status = 0;
-    bool gotLocation = false;
-    int level = 0;
     int voltage = 0;
-    static char lat[32], lon[32];
     char theIP[20];
     // crypto key of the board
     static uc_ed25519_key uc_key;
-
+    //RTC Struct
     rtc_datetime_t date_time;
+    //Payload array stuff
+    payload_t pVal[measureIndex];
 
-    // Create a TCP socket
-    printf("\n----- Setting up TCP connection -----\r\n");
+    //if for loop is not completed(break), we need number of payload values stored
+    int tempIndex = 0;
+    for (int i = 0; i < measureIndex; ++i) {
+        bool gotLocation = false;
+        int zone = 0;
 
-    if (!modem.queryIP(UTCP_HOST, theIP)) {
-        PRINTF("Get IP failed\r\n");
-        return 1;
+        pVal[i].temp = (int) (temperature * 100.0f);
+        pVal[i].pressure = (int) pressure;
+        pVal[i].humidity = (int) ((humidity) * 100.0f);
+        pVal[i].altitide = (int) (altitude * 100.0f);
+        pVal[i].aq = airqualitysensor.first_vol;
+        pVal[i].aqr = airqualitysensor.aqRefVal;
+        pVal[i].lp = loop_counter;
+
+        /* Get battery level, latitude, logitude, time stamp*/
+        modem.getModemBattery(&status, &pVal[i].batLevel, &voltage);
+        PRINTF("the battery status %d, level %d, voltage %d\r\n", status, pVal[i].batLevel, voltage);
+
+        for (int lc = 0; lc < 3 && !gotLocation; lc++) {
+            gotLocation = modem.get_location_date(pVal[i].lat, pVal[i].lon, &date_time, &zone);
+            PRINTF("setting current time from GSM\r\n");
+            PRINTF("%04hd-%02hd-%02hd %02hd:%02hd:%02hd\r\n",
+                   date_time.year, date_time.month, date_time.day, date_time.hour, date_time.minute,
+                   date_time.second);
+            PRINTF("lat is %s lon %s\r\n", pVal[i].lat, pVal[i].lon);
+            wait_ms(500);
+        }
+        if (!gotLocation) return 1;
+
+        sprintf(pVal[i].timeStamp, timeStamp_template, date_time.year,
+                date_time.month, date_time.day, date_time.hour, date_time.minute, date_time.second, zone);
+        pVal[i].errorFlag = error_flag;
+        error_flag = 0x00;
+
+        /* RTC time counter has to be stopped before setting the date & time in the TSR register */
+        RTC_StopTimer(RTC);
+        /* Set RTC time to default */
+        RTC_SetDatetime(RTC, &date_time);
+        /* End RTC stuff*/
+
+        loop_counter++;
+        tempIndex++;
+
+        WDOG_Refresh(wdog_base);
+
+        if (((int) (temperature * 100)) > temp_threshold || unsuccessfulSend || aqPolluted) {
+            break;
+        }
+
+        PRINTF("Loop Count:: %d\r\n", tempIndex);
+        wait(readInterval);
+    } // Payload into array for loop
+
+    /* Get the total Payload array size*/
+    int payloadSize = 0;
+    int pValSize[tempIndex];
+    for (int j = 0; j < tempIndex; ++j) {
+        pValSize[j] = snprintf(NULL, 0, payload_template,
+                               pVal[j].temp,
+                               pVal[j].pressure,
+                               pVal[j].humidity,
+                               pVal[j].altitide,
+                               pVal[j].lat,
+                               pVal[j].lon,
+                               pVal[j].batLevel,
+                               pVal[j].lp,
+                               pVal[j].errorFlag,
+                               pVal[j].aq,
+                               pVal[j].aqr,
+                               pVal[j].timeStamp);
+        payloadSize += pValSize[j];
     }
 
-    TCPSocket *socket = new TCPSocket();
-    // TODO make sure you close the socket or delet socket before returning error handlers
-    nsapi_error_t open_result = socket->open(&modem);
-    socket->set_timeout(0);
+    /*for , after every payload {....}, {....}, ...*/
+    payloadSize += tempIndex - 1;
+    /*2 chars for [], [{....}, {....}, {....}, ...], in the JSON object to form payload array*/
+    payloadSize += 2;
 
-    if (open_result != 0) {
-        printf("Opening TCPSocket failed... %d\n", open_result);
-        delete socket;
-        return 1;
+    /* ++++++++++++++++++++++++++++++++++++++++
+     * Generate the payload array to be signed
+     * Example: '[{"t":22.0,"p":1019.5,"h":40.2,"lat":"12.475886","lon":"51.505264","bat":100,"lps":99999, "aq":121, "aqr":121, "ts":2017-05-09T10:25:41.836Z}, ...]'
+     */
+    char *payload = (char *) malloc((size_t) payloadSize + 1);
+    memset(payload, 0, (size_t) (payloadSize + 1));
+    // open [ to form payload array
+    strcpy(payload, "[");
+    for (int k = 0; k < tempIndex; ++k) {
+        char *tempPayload = (char *) malloc(size_t(pValSize[k]));
+        memset(tempPayload, 0, (size_t) ((pValSize[k])));
+        sprintf(tempPayload, payload_template,
+                pVal[k].temp,
+                pVal[k].pressure,
+                pVal[k].humidity,
+                pVal[k].altitide,
+                pVal[k].lat,
+                pVal[k].lon,
+                pVal[k].batLevel,
+                pVal[k].lp,
+                pVal[k].errorFlag,
+                pVal[k].aq,
+                pVal[k].aqr,
+                pVal[k].timeStamp);
+        PRINTF("tempPayload::: %s\r\n", tempPayload);
+        if (k == 0) {
+            strncat(payload, tempPayload, (size_t) pValSize[k]);
+        } else {
+            strcat(payload, ",");
+            strncat(payload, tempPayload, (size_t) pValSize[k]);
+        }
+        free(tempPayload);
     }
+    // cloase the ], end of the payload array
+    strcat(payload, "]");
 
-    nsapi_error_t connect_result = socket->connect(theIP, UTCP_PORT);
-    if (connect_result != 0) {
-        printf("Connecting over TCPSocket failed... %d\n", connect_result);
-        delete socket;
-        return 1;
-    }
-
-
-    /* Get battery level, latitude, logitude, time stamp*/
-    modem.getModemBattery(&status, &level, &voltage);
-    printf("the battery status %d, level %d, voltage %d\r\n", status, level, voltage);
-
-    for (int lc = 0; lc < 3 && !gotLocation; lc++) {
-        gotLocation = modem.get_location_date(lon, lat, &date_time);
-        PRINTF("setting current time from GSM\r\n");
-        PRINTF("%04hd-%02hd-%02hd %02hd:%02hd:%02hd\r\n",
-               date_time.year, date_time.month, date_time.day, date_time.hour, date_time.minute, date_time.second);
-        PRINTF("lat is %s lon %s\r\n", lat, lon);
-    }
-    if (!gotLocation) {
-        delete socket;
-        return 1;
-    }
-
-    /* RTC time counter has to be stopped before setting the date & time in the TSR register */
-    RTC_StopTimer(RTC);
-    /* Set RTC time to default */
-    RTC_SetDatetime(RTC, &date_time);
-    /* End RTC stuff*/
+    //payload arrray loop
+    PRINTF("PAYLOAD::(%d):: %s\r\n", payloadSize, payload);
 
     /* Crypto stuff, init and import the ecc key*/
     uc_init();
     uc_import_ecc_key(&uc_key, device_ecc_key, device_ecc_key_len);
 
-    //++++++++++++++++++++++++++++++++++++++++
-    // payload structure to be signed
-    // Example: '{"t":22.0,"p":1019.5,"h":40.2,"lat":"12.475886","lon":"51.505264","bat":100,"lps":99999}'
-    int payload_size = snprintf(NULL, 0, payload_template,
-                                (int) (temperature * 100.0f), (int) pressure, (int) ((humidity) * 100.0f),
-                                (int) (altitude * 100.0f),
-                                lat, lon, level, loop_counter, error_flag, aqVal, aqRefVal);
-    char *payload = (char *) malloc((size_t) payload_size + 1);
-    sprintf(payload, payload_template,
-            (int) (temperature * 100.0f), (int) (pressure), (int) ((humidity) * 100.0f), (int) (altitude * 100.0f),
-            lat, lon, level, loop_counter, error_flag, aqVal, aqRefVal);
-
-    error_flag = 0x00;
-
+    //Get IMEI of the
     const char *imei = modem.get_imei();
 
     // be aware that you need to free these strings after use
@@ -204,8 +268,8 @@ int HTTPSession() {
     char *pub_key_hash = uc_base64_encode(uc_key.p, 32);
     char *payload_hash = uc_ecc_sign_encoded(&uc_key, (const unsigned char *) payload, strlen(payload));
 
-    PRINTF("PUBKEY   : %s\r\n", pub_key_hash);
     PRINTF("AUTH     : %s\r\n", auth_hash);
+    PRINTF("PUBKEY   : %s\r\n", pub_key_hash);
     PRINTF("SIGNATURE: %s\r\n", payload_hash);
 
     int message_size = snprintf(NULL, 0, message_template, auth_hash, pub_key_hash, payload_hash, payload);
@@ -220,9 +284,35 @@ int HTTPSession() {
     delete (payload_hash);
     free(payload);
 
-    PRINTF("--MESSAGE (%d)\r\n", strlen(message));
-    printf("\r\n--MESSAGE %s\r\n", message);
-    wait_ms(100);
+    printf("\r\nMESSAGE::(%d):: %s\r\n", (int) strlen(message), message);
+
+    // Create a TCP socket
+    if (!modem.queryIP(UTCP_HOST, theIP)) {
+        PRINTF("Get IP failed\r\n");
+        return 1;
+    }
+
+    printf("\r\nOpen the TCP Socket\r\n");
+
+    TCPSocket *socket = new TCPSocket();
+    // Set the timeout to 0
+    socket->set_timeout(0);
+
+    // TODO make sure you close the socket or delet socket before returning error handlers
+    nsapi_error_t open_result = socket->open(&modem);
+
+    if (open_result != 0) {
+        printf("Opening TCPSocket failed... %d\n", open_result);
+        delete socket;
+        return 1;
+    }
+
+    nsapi_error_t connect_result = socket->connect(theIP, UTCP_PORT);
+    if (connect_result != 0) {
+        printf("Connecting over TCPSocket failed... %d\n", connect_result);
+        delete socket;
+        return 1;
+    }
 
     // POST HTTP request
     {
@@ -234,14 +324,11 @@ int HTTPSession() {
 
         if (!post_res) {
             PRINTF("HttpRequest failed (error code %d)\n", post_req->get_error());
-            unsuccessfulSend = true;
             delete socket;
             return 1;
         }
 
-        PRINTF("\n----- HTTP POST response -----\n");
-//        dump_response(post_res);
-
+        // verify the HTTP response
         uc_ed25519_pub_pkcs8 response_key;
         unsigned char response_signature[SHA512_HASH_SIZE];
         memset(&response_key, 0xff, sizeof(uc_ed25519_pub_pkcs8));
@@ -249,22 +336,18 @@ int HTTPSession() {
 
         char *response_payload = process_response((char *) post_res->get_body_as_string().c_str(), &response_key,
                                                   response_signature);
-        wait(1);
 
         hex_dump("KEY:", (unsigned char *) &response_key, sizeof(uc_ed25519_pub_pkcs8));
         hex_dump("SIG:", response_signature, sizeof(response_signature));
         PRINTF("PAYLOAD: %s\r\n", response_payload);
-        wait_ms(50);
+        // Process the verified HTTP response
         process_payload(response_payload);
 
         free(response_payload);
-
         delete post_req;
     }
     delete socket;
-
-    modem.powerDown();
-//    powerDownWakeupOnRtc(5 * 60);
+//    modem.powerDown();
     return 0;
 }
 
@@ -301,16 +384,15 @@ static void WaitWctClose(WDOG_Type *base)
 // Main loop
 int main() {
 
-
-    int connectFail = 0;
-    printf("Fire  up the sensors\r\n");
+    printf("Fire up the sensors\r\n");
     extPower.write(1);
+    int connectFail = 0;
 
     if ((RCM_GetPreviousResetSources(rcm_base) & kRCM_SourceWdog)) {
         WDOG_ClearResetCount(wdog_base);
         error_flag = E_WDOG_RESET;
         printf("\r\nWatchDog reset the board\r\n");
-    } else error_flag = (uint8_t)RCM_GetPreviousResetSources(rcm_base);
+    } else error_flag = (uint8_t) RCM_GetPreviousResetSources(rcm_base);
 
     osThreadCreate(osThread(ledBlink), NULL);
     osThreadCreate(osThread(bme_thread), NULL);
@@ -333,35 +415,33 @@ int main() {
     WaitWctClose(wdog_base);
 
     while (1) {
-        if (((int) (temperature * 100)) > temp_threshold || (loop_counter % (MAX_INTERVAL / interval) == 0) ||
-            unsuccessfulSend) {
-            const int r = modem.connect(CELL_APN, CELL_USER, CELL_PWD);
-            if (r != 0) {
+
+        if (modem.checkGPRS() == 0) {
+            if (modem.connect(CELL_APN, CELL_USER, CELL_PWD)) {
                 connectFail++;
                 PRINTF("Cannot connect to the network, see serial output");
-            } else {
-                unsuccessfulSend = HTTPSession();
-                if (!unsuccessfulSend) {
-                    connectFail = 0;
-                } else {
-                    connectFail++;
-                    modem.powerDown();
-                }
-            }
+            } else connectFail = 0;
         }
-        //Feed the DOG
-        WDOG_Refresh(wdog_base);
+
+        unsuccessfulSend = HTTPSession();
+
+        if (!unsuccessfulSend) {
+            connectFail = 0;
+        } else connectFail++;
 
         if (connectFail >= 5) {
             modem.powerDown();
-            connectFail = 0;
-//            NVIC_SystemReset();
+            error_flag = E_MODEM_RESET;
+            if (connectFail > 6) {
+                NVIC_SystemReset();
+            }
         }
 
+        //Feed the DOG
+        WDOG_Refresh(wdog_base);
+
         printf("%d, loop:%d..\r\n", airqualitysensor.first_vol, loop_counter);
-        if (!connectFail) {
-            wait(10);
-            loop_counter++;
-        }
     }
 }
+
+
