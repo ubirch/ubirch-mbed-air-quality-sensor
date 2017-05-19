@@ -143,7 +143,7 @@ int HTTPSession() {
     int tempIndex = 0;
     for (int i = 0; i < measureIndex; ++i) {
         bool gotLocation = false;
-        int zone = 0;
+        int zone[1];
 
         pVal[i].temp = (int) (temperature * 100.0f);
         pVal[i].pressure = (int) pressure;
@@ -158,18 +158,18 @@ int HTTPSession() {
         PRINTF("the battery status %d, level %d, voltage %d\r\n", status, pVal[i].batLevel, voltage);
 
         for (int lc = 0; lc < 3 && !gotLocation; lc++) {
-            gotLocation = modem.get_location_date(pVal[i].lat, pVal[i].lon, &date_time, &zone);
+            gotLocation = modem.get_location_date(pVal[i].lat, pVal[i].lon, &date_time, zone);
             PRINTF("setting current time from GSM\r\n");
-            PRINTF("%04hd-%02hd-%02hd %02hd:%02hd:%02hd\r\n",
+            printf("%04hd-%02hd-%02hd %02hd:%02hd:%02hd%dz\r\n",
                    date_time.year, date_time.month, date_time.day, date_time.hour, date_time.minute,
-                   date_time.second);
+                   date_time.second, zone[0]);
             PRINTF("lat is %s lon %s\r\n", pVal[i].lat, pVal[i].lon);
             wait_ms(500);
         }
         if (!gotLocation) return 1;
 
         sprintf(pVal[i].timeStamp, timeStamp_template, date_time.year,
-                date_time.month, date_time.day, date_time.hour, date_time.minute, date_time.second, zone);
+                date_time.month, date_time.day, date_time.hour, date_time.minute, date_time.second, zone[0]);
         pVal[i].errorFlag = error_flag;
         error_flag = 0x00;
 
