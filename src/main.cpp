@@ -3,11 +3,11 @@
 //
 
 #include <M66Interface.h>
-#include <kinetis_lowpower.h>
 #include <http_response.h>
 #include <http_request.h>
 #include <crypto.h>
 #include <fsl_wdog.h>
+#include <fsl_rcm.h>
 #include "mbed.h"
 #include "../Grove_Air_Quality_Sensor_Library/Air_Quality.h"
 #include "../config.h"
@@ -121,8 +121,6 @@ int HTTPSession() {
 
     uint8_t status = 0;
     bool gotLocation = false;
-    int rc;
-    int ret;
     int level = 0;
     int voltage = 0;
     static char lat[32], lon[32];
