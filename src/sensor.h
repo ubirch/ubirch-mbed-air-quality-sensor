@@ -40,6 +40,7 @@ extern "C" {
 #define E_MODEM_RESET   0b10000011 //131
 #define E_TCP_FAIL      0b10000100 //132
 
+
 typedef struct {
     int temp;
     int pressure;
@@ -48,8 +49,10 @@ typedef struct {
     int batLevel;
     int lp;
     int errorFlag;
+#if AIR_QUALITY_SENSOR
     int aq;
     int aqr;
+#endif
     char lat[32];
     char lon[32];
     char timeStamp[24];

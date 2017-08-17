@@ -1,6 +1,9 @@
 # ubirch-mbed-air-quality-sensor
 
-# Ubirch Air-Quality Sensor
+# Ubirch Air-Quality/ Environmental Sensor
+
+This repo can be used to create Air qulity sensor and also environmental sensor. Set the `AIR_QUALITY_SENSOR` in `mbed_app.json` 
+file to 1 for air quality sensor and 0 for environmental sensor
 
 Measure the quality of the air using Seeed Groove-Air quality sensor v1.3 and send data to backend using UBRIDGE sensor
 

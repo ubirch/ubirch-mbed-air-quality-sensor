@@ -1,5 +1,5 @@
 //
-// Created by nirao on 18.04.17.
+// Created by Niranjan Rao on 18.04.17.
 //
 
 #include <M66Interface.h>
@@ -9,7 +9,6 @@
 #include <fsl_wdog.h>
 #include <fsl_rcm.h>
 #include "mbed.h"
-#include "../Grove_Air_Quality_Sensor_Library/Air_Quality.h"
 #include "../config.h"
 #include "../BME280/BME280.h"
 #include "sensor.h"
@@ -20,11 +19,10 @@
 #define PRESSURE_SEA_LEVEL    101325
 #define TEMPERATURE_THRESHOLD 4000
 
-DigitalOut extPower(PTC8);
-DigitalOut led1(LED1);
-M66Interface modem(GSM_UART_TX, GSM_UART_RX, GSM_PWRKEY, GSM_POWER, true);
-BME280 bmeSensor(I2C_SDA, I2C_SCL);
-AirQuality airqualitysensor(PTC0);
+DigitalOut    extPower(PTC8);
+DigitalOut    led1(LED1);
+M66Interface  modem(GSM_UART_TX, GSM_UART_RX, GSM_PWRKEY, GSM_POWER, true);
+BME280        bmeSensor(I2C_SDA, I2C_SCL);
 
 //    WATCHDOG TIMER
 #define WDOG_WCT_INSTRUCITON_COUNT (256U)
@@ -32,7 +30,17 @@ static WDOG_Type *wdog_base = WDOG;
 static RCM_Type *rcm_base = RCM;
 
 //actual payload template
-static const char *const payload_template = "{\"t\":%d,\"p\":%d,\"h\":%d,\"a\":%d,\"la\":\"%s\",\"lo\":\"%s\",\"ba\":%d,\"lp\":%d,\"e\":%d,\"aq\":%d,\"aqr\":%d,\"ts\":\"%s\"}";
+#if AIR_QUALITY_SENSOR
+    #include "../Grove_Air_Quality_Sensor_Library/Air_Quality.h"
+
+    AirQuality airqualitysensor(PTC0);
+    static const char *const payload_template = "{\"t\":%d,\"p\":%d,\"h\":%d,\"a\":%d,\"la\":\"%s\",\"lo\":\"%s\",\"ba\":%d,\"lp\":%d,\"e\":%d,\"aq\":%d,\"aqr\":%d,\"ts\":\"%s\"}";
+    bool aqPolluted = false;
+
+#else
+    static const char *const payload_template = "{\"t\":%d,\"p\":%d,\"h\":%d,\"a\":%d,\"la\":\"%s\",\"lo\":\"%s\",\"ba\":%d,\"lp\":%d,\"e\":%d,\"ts\":\"%s\"}";
+#endif
+
 static const char *const message_template = "{\"fw\":\"V.3.1\",\"v\":\"0.0.3\",\"a\":\"%s\",\"k\":\"%s\",\"s\":\"%s\",\"p\":%s}";
 static const char *const timeStamp_template = "%d-%d-%dT%d:%d:%d.%dZ"; //“2017-05-09T10:25:41.836Z”
 
@@ -47,7 +55,6 @@ static int readInterval = DEFAULT_READ_INTERVAL;
 uint8_t error_flag = 0x00;
 static int16_t loop_counter = 0;
 bool unsuccessfulSend = false;
-bool aqPolluted = false;
 
 void dump_response(HttpResponse* res) {
     printf("Status: %d - %s\n", res->get_status_code(), res->get_status_message().c_str());
@@ -59,6 +66,7 @@ void dump_response(HttpResponse* res) {
     printf("\nBody (%d bytes):\n\n%s\n", (int)res->get_body_length(), res->get_body_as_string().c_str());
 }
 
+#if AIR_QUALITY_SENSOR
 // Interrupt Handler
 void AirQualityInterrupt(void) {
     airqualitysensor.last_vol = airqualitysensor.first_vol;
@@ -69,6 +77,7 @@ void AirQualityInterrupt(void) {
         aqPolluted = true;
     }
 }
+#endif
 
 // convert a number of characters into an unsigned integer value
 static unsigned int to_uint(const char *ptr, size_t len) {
@@ -149,8 +158,10 @@ int HTTPSession() {
         pVal[i].pressure = (int) pressure;
         pVal[i].humidity = (int) ((humidity) * 100.0f);
         pVal[i].altitide = (int) (altitude * 100.0f);
+#if AIR_QUALITY_SENSOR
         pVal[i].aq = airqualitysensor.first_vol;
         pVal[i].aqr = airqualitysensor.aqRefVal;
+#endif
         pVal[i].lp = loop_counter;
 
         /* Get battery level, latitude, logitude, time stamp*/
@@ -184,9 +195,15 @@ int HTTPSession() {
 
         WDOG_Refresh(wdog_base);
 
+#if AIR_QUALITY_SENSOR
         if (((int) (temperature * 100)) > temp_threshold || unsuccessfulSend || aqPolluted) {
             break;
         }
+#else
+        if (((int) (temperature * 100)) > temp_threshold || unsuccessfulSend) {
+            break;
+        }
+#endif
 
         PRINTF("Loop Count:: %d\r\n", tempIndex);
         wait(readInterval);
@@ -206,8 +223,10 @@ int HTTPSession() {
                                pVal[j].batLevel,
                                pVal[j].lp,
                                pVal[j].errorFlag,
+#if AIR_QUALITY_SENSOR
                                pVal[j].aq,
                                pVal[j].aqr,
+#endif
                                pVal[j].timeStamp);
         payloadSize += pValSize[j];
     }
@@ -228,7 +247,7 @@ int HTTPSession() {
     for (int k = 0; k < tempIndex; ++k) {
         char *tempPayload = (char *) malloc(size_t(pValSize[k]));
         memset(tempPayload, 0, (size_t) ((pValSize[k])));
-        sprintf(tempPayload, payload_template,
+         sprintf(tempPayload, payload_template,
                 pVal[k].temp,
                 pVal[k].pressure,
                 pVal[k].humidity,
@@ -238,9 +257,12 @@ int HTTPSession() {
                 pVal[k].batLevel,
                 pVal[k].lp,
                 pVal[k].errorFlag,
+#if AIR_QUALITY_SENSOR
                 pVal[k].aq,
                 pVal[k].aqr,
+#endif
                 pVal[k].timeStamp);
+
         PRINTF("tempPayload::: %s\r\n", tempPayload);
         if (k == 0) {
             strncat(payload, tempPayload, (size_t) pValSize[k]);
@@ -397,7 +419,9 @@ int main() {
     osThreadCreate(osThread(ledBlink), NULL);
     osThreadCreate(osThread(bme_thread), NULL);
 
+#if AIR_QUALITY_SENSOR
     airqualitysensor.init(AirQualityInterrupt);
+#endif
 
     rtc_config_t rtcConfig;
     /* Init RTC and update the RYC date and time*/
@@ -440,7 +464,6 @@ int main() {
         //Feed the DOG
         WDOG_Refresh(wdog_base);
 
-        printf("%d, loop:%d..\r\n", airqualitysensor.first_vol, loop_counter);
     }
 }
 
