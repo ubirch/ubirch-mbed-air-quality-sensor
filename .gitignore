@@ -13,3 +13,8 @@ Debug
 .cproject
 .project
 mbed-os/*
+/wolfSSL
+/mbed-os-quectelM66-driver
+/mbed-os
+/mbed-http
+/BME280
