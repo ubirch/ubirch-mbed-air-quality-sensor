@@ -97,20 +97,20 @@ target_include_directories(mbed-os-quectelM66-driver PUBLIC
         mbed-os-quectelM66-driver/M66ATParser/BufferedSerial/Buffer
         )
 
-add_library(MQTT
-        MQTT/MQTTPacket/MQTTConnectClient.c
-        MQTT/MQTTPacket/MQTTConnectServer.c
-        MQTT/MQTTPacket/MQTTPacket.c
-        MQTT/MQTTPacket/MQTTSerializePublish.c
-        MQTT/MQTTPacket/MQTTSubscribeClient.c
-        MQTT/MQTTPacket/MQTTSubscribeServer.c
-        MQTT/MQTTPacket/MQTTUnsubscribeClient.c
-        MQTT/MQTTPacket/MQTTUnsubscribeServer.c
-        )
-target_include_directories(MQTT PUBLIC
-        MQTT
-        MQTT/MQTTPacket
-        )
+#add_library(MQTT
+#        MQTT/MQTTPacket/MQTTConnectClient.c
+#        MQTT/MQTTPacket/MQTTConnectServer.c
+#        MQTT/MQTTPacket/MQTTPacket.c
+#        MQTT/MQTTPacket/MQTTSerializePublish.c
+#        MQTT/MQTTPacket/MQTTSubscribeClient.c
+#        MQTT/MQTTPacket/MQTTSubscribeServer.c
+#        MQTT/MQTTPacket/MQTTUnsubscribeClient.c
+#        MQTT/MQTTPacket/MQTTUnsubscribeServer.c
+#        )
+#target_include_directories(MQTT PUBLIC
+#        MQTT
+#        MQTT/MQTTPacket
+#        )
 
 add_library(wolfSSL
         wolfSSL/src/crl.c
@@ -180,8 +180,8 @@ target_include_directories(CRYPTO PUBLIC crypto)
 add_library(JSMN jsmn/jsmn.c)
 target_include_directories(JSMN PUBLIC jsmn)
 
-add_library(VLLS mbed-kinetis-lowpower/kinetis_lowpower.cpp)
-target_include_directories(VLLS PUBLIC mbed-kinetis-lowpower)
+#add_library(VLLS mbed-kinetis-lowpower/kinetis_lowpower.cpp)
+#target_include_directories(VLLS PUBLIC mbed-kinetis-lowpower)
 
 add_library(HTTP mbed-http/http_parser/http_parser.c)
 target_include_directories(HTTP PUBLIC mbed-http/http_parser
@@ -199,8 +199,8 @@ add_executable(airquality src/main.cpp src/response.c)
 target_link_libraries(airquality mbed-os AirQualitySensor
         wolfSSL
         mbed-os-quectelM66-driver
-        VLLS
-        MQTT
+#        VLLS
+#        MQTT
         JSMN
         CRYPTO
         HTTP

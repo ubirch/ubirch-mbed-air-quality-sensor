@@ -9,7 +9,7 @@
     "OS_MUTEXCNT=1",
     "CURVED25519_SMALL=1",
     "WOLFSSL_BASE64_ENCODE=1",
-    "AIR_QUALITY_SENSOR=1"
+    "AIR_QUALITY_SENSOR=0"
   ],
   "target_overrides": {
     "*": {

@@ -55,6 +55,7 @@ static int readInterval = DEFAULT_READ_INTERVAL;
 uint8_t error_flag = 0x00;
 static int16_t loop_counter = 0;
 bool unsuccessfulSend = false;
+volatile bool doBlink = 0;
 
 void dump_response(HttpResponse* res) {
     printf("Status: %d - %s\n", res->get_status_code(), res->get_status_message().c_str());
@@ -169,7 +170,7 @@ int HTTPSession() {
         PRINTF("the battery status %d, level %d, voltage %d\r\n", status, pVal[i].batLevel, voltage);
 
         for (int lc = 0; lc < 3 && !gotLocation; lc++) {
-            gotLocation = modem.get_location_date(pVal[i].lat, pVal[i].lon, &date_time, zone);
+            gotLocation = modem.get_location_date(pVal[i].lon, pVal[i].lat, &date_time, zone);
             PRINTF("setting current time from GSM\r\n");
             printf("%04hd-%02hd-%02hd %02hd:%02hd:%02hd%dz\r\n",
                    date_time.year, date_time.month, date_time.day, date_time.hour, date_time.minute,
@@ -209,6 +210,7 @@ int HTTPSession() {
         wait(readInterval);
     } // Payload into array for loop
 
+    doBlink = true;
     /* Get the total Payload array size*/
     int payloadSize = 0;
     int pValSize[tempIndex];
@@ -370,12 +372,14 @@ int HTTPSession() {
     }
     delete socket;
 //    modem.powerDown();
+
+    doBlink = false;
     return 0;
 }
 
 void ledBlink(void const *args){
     while(1) {
-        led1 = !led1;
+        if(doBlink) led1 = !led1;
         Thread::wait(800);
     }
 }
