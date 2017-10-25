@@ -10,7 +10,7 @@ extern "C" {
 //Default values
 #define DEFAULT_SEND_INTERVAL 3*60 //Seconds
 #define DEFAULT_READ_INTERVAL 12   //Seconds
-#define DEFAULT_MEASURE_INDEX 9  //12
+#define DEFAULT_MEASURE_INDEX 5  //12
 //Max values
 #define MAX_SEND_INTERVAL     30*60 //Seconds
 #define MAX_READ_INTERVAL     128   //Seconds
